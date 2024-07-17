@@ -1,11 +1,5 @@
 path;file;start;stop;POI;condition;calibration
 shift_midroll_run01;20220228_1roll_midroll_B01.mov;00:00:29;00:01:15;00:00:33;midroll_run01;20220304_calibration.mov
 shift_midroll_run01;20220228_1roll_midroll_B02.mov;00:00:29;00:01:17;00:00:33;midroll_run01;20220304_calibration.mov
-shift_midroll_run01;20220228_1roll_midroll_B05.mov;00:00:26;00:00:48;00:00:29;midroll_run01;20220304_calibration.mov
-shift_midroll_run01;20220228_1roll_midroll_B06.mov;00:00:16;00:00:38;00:00:19;midroll_run01;20220304_calibration.mov
-shift_midroll_run01;20220228_1roll_midroll_B07.mov;00:00:26;00:00:52;00:00:30;midroll_run01;20220304_calibration.mov
 shift_midroll_run10;20220212_9rolls_midroll_B01.mov;00:07:09;00:07:36;00:07:13;midroll_run10;20220304_calibration.mov
 shift_midroll_run10;20220212_9rolls_midroll_B04.mov;00:08:33;00:09:02;00:08:35;midroll_run10;20220304_calibration.mov
-shift_midroll_run10;20220212_9rolls_midroll_B05.mov;00:08:15;00:08:53;00:08:20;midroll_run10;20220304_calibration.mov
-shift_midroll_run10;20220212_9rolls_midroll_B06.mov;00:05:44;00:06:10;00:05:47;midroll_run10;20220304_calibration.mov
-shift_midroll_run10;20220212_9rolls_midroll_B07.mov;00:07:51;00:08:28;00:07:54;midroll_run10;20220304_calibration.mov

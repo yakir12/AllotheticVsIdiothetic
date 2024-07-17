@@ -1,4 +1,5 @@
 [deps]
+AngleBetweenVectors = "ec570357-d46e-52ed-9726-18773498274d"
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
 Chain = "8be319e6-bccf-4806-a6f7-6fae938471bc"
@@ -7,6 +8,7 @@ DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 DataFramesMeta = "1313f7d8-7da2-5740-9ea0-a2ca25f37964"
 Dierckx = "39dd38d3-220a-591b-8e3c-4c3a8c710a94"
 FileIO = "5789e2e9-d7fb-5bc7-8068-2c6fae9b9549"
+IterTools = "c8e1da08-722c-5040-9ed9-7db0dc04731e"
 OhMyThreads = "67456a42-1dca-4109-a031-0a68de7e3ad5"
 Rotations = "6038ab10-8711-5258-84ad-4b1120ba62dc"
 SimpTrack = "cbfce16d-aa61-4ea5-b8a8-99ca74cb25a4"

@@ -2,7 +2,7 @@ using SimpTrack
 using Dates, LinearAlgebra
 using CSV, DataFrames, Chain, DataFramesMeta
 using Dierckx, VideoIO, OhMyThreads
-using StaticArrays, CoordinateTransformations, Rotations
+using StaticArrays, CoordinateTransformations, Rotations, AngleBetweenVectors, IterTools
 using CairoMakie
 
 const SV = SVector{2, Float64}
@@ -10,6 +10,7 @@ const SV = SVector{2, Float64}
 include("functions.jl")
 
 data_path = "data"
+fps = 25 # frames per second
 
 # Tracking
 
@@ -17,47 +18,40 @@ df = @chain joinpath(data_path, "runs.csv") begin
     CSV.read(DataFrame)
     @transform :calibration_id = :calibration
     @rtransform :name = first(splitext(:file))
-    @rtransform :file = joinpath(data_path, :path, :file)
+    @rtransform :file = realpath(joinpath("..", data_path, :path, :file))
     @rtransform :start = tosecond(:start - Time(0))
     @rtransform :stop = tosecond(:stop - Time(0))
+    @rtransform :POI = tosecond(:POI - Time(0))
 end
+
 df.track = tmap(track, df.file, df.start, df.stop)
 
-# save mini video for debugging purposes
-tforeach(save_vid, df.name, df.file, df.track)
+# # save mini video for debugging purposes
+# tforeach(save_vid, df.name, df.file, df.track)
 
 
 # rotate them
 
-function rotate(xy, i)
-    trans = Translation(-xy[1])
-    p1 = xy[1]
-    p2 = xy[i]
-    x, y = normalize(p2 - p1)
-    θ = π/2 - atan(y, x)
-    rot = recenter(LinearMap(Angle2d(θ)), p1)
-    cmp = trans ∘ rot
-    cmp.(xy)
-end
-
-colors = Dict(zip(unique(df.condition), Makie.wong_colors()))
-
 @chain df begin
-    @rtransform! :POI_i = findfirst(≥(tosecond(:POI - Time(0))), first(:track))
-    @rtransform! :t = first(:track)
-    @rtransform! :xy = SV.(last(:track))
-    @rtransform! :rotated = rotate(:xy, :POI_i)
-    @rtransform! :before = :rotated[1: :POI_i]
-    @rtransform! :after = :rotated[:POI_i:end]
-    @rtransform! :color = colors[:condition]
+    transform!([:track, :POI] => ByRow(smooth_rotate_split) => [:before, :after])
+    transform!([:before, :after] .=> ByRow(cordlength))
+    transform!([:before, :after] .=> ByRow(curvelength))
+    transform!([:before_cordlength, :before_curvelength] => ByRow(/) => :before_straightness)
+    transform!([:after_cordlength, :after_curvelength] => ByRow(/) => :after_straightness)
+    transform!([:before, :after] .=> ByRow(cumulative_angle))
 end
 
-fig = Figure()
-ax = Axis(fig[1,1], aspect=DataAspect())
-for row in eachrow(df)
-    lines!(ax, row.before, color = :gray)
-    lines!(ax, row.after, color = row.color, label = row.condition)
+fig = Figure();
+axs = []
+for (i, (k, grp)) in enumerate(pairs(groupby(df, :condition)))
+    ax = Axis(fig[1,i], aspect=DataAspect(), title = k.condition)
+    push!(axs, ax)
+    for row in eachrow(grp)
+        lines!(ax, row.before, color = :gray)
+        lines!(ax, row.after, color = :black)
+    end
 end
-axislegend(ax, merge = true)
+linkaxes!(axs...)
 save("figure.pdf", fig)
 
+CSV.write("summary.csv", select(df, Cols("name", "condition", r"cord", r"curve", r"straight", r"angle")))
