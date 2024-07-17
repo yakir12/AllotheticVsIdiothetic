@@ -1,4 +1,5 @@
-tosecond(t::T) where {T} = t / convert(T, Dates.Second(1))
+tosecond(t::T) where {T <: Dates.TimePeriod} = t / convert(T, Dates.Second(1))
+tosecond(t::T) where {T <: Dates.TimeType} = tosecond(t - Time(0))
 
 # function get_spline(track)
 #     t, xy = track

@@ -16,18 +16,15 @@ fps = 25 # frames per second
 
 df = @chain joinpath(data_path, "runs.csv") begin
     CSV.read(DataFrame)
-    @transform :calibration_id = :calibration
     @rtransform :name = first(splitext(:file))
     @rtransform :file = realpath(joinpath("..", data_path, :path, :file))
-    @rtransform :start = tosecond(:start - Time(0))
-    @rtransform :stop = tosecond(:stop - Time(0))
-    @rtransform :POI = tosecond(:POI - Time(0))
+    transform!([:start, :POI, :stop] .=> ByRow(tosecond); renamecols = false)
 end
 
 df.track = tmap(track, df.file, df.start, df.stop)
 
 # # save mini video for debugging purposes
-# tforeach(save_vid, df.name, df.file, df.track)
+tforeach(save_vid, df.name, df.file, df.track)
 
 
 # rotate them
@@ -43,7 +40,7 @@ end
 
 fig = Figure();
 axs = []
-for (i, (k, grp)) in enumerate(pairs(groupby(df, :condition)))
+for (i, (k, grp)) in enumerate(pairs(DataFrames.groupby(df, :condition)))
     ax = Axis(fig[1,i], aspect=DataAspect(), title = k.condition)
     push!(axs, ax)
     for row in eachrow(grp)
