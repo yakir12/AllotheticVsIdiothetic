@@ -1,5 +1,4 @@
 *.pdf
 *.mp4
 *.png
-runs.csv
-calib.csv
+*.csv
