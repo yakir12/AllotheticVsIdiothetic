@@ -12,40 +12,41 @@ const SV = SVector{2, Float64}
 include("functions.jl")
 include("calibrations.jl")
 
-data_path = "data"
+calib_file = "/home/yakir/tmp/Elin_tracks/calib.csv"
+runs_file = "/home/yakir/tmp/Elin_tracks/runs.csv"
 
 # Calibrations
 
-calibrations = CSV.read(joinpath(data_path, "calib.csv"), DataFrame)
+calibrations = CSV.read(calib_file, DataFrame)
 
 # data quality checks
 @assert allunique(calibrations.calibration_id) "Calibration IDs not identical"
 for row in eachrow(calibrations)
     @assert row.start < row.stop "start must occur before stop in calibration $(row.calibration_id)"
-    file = joinpath(data_path, row.file)
+    file = joinpath(row.path, row.file)
     @assert isfile(file) "calibration file $file does not exist"
     # @assert that the time stamps are within the period of the video
 end
 
-@rselect!(calibrations, :calibration_id, :calib = calib(joinpath(data_path, :file), :start, :stop, :extrinsic))
+@rselect!(calibrations, :calibration_id, :calib = calib(:calibration_id, joinpath(:path, :file), :start, :stop, :extrinsic))
 
 # # save calibrations images for quality assesment
 # suspect_calibration = "20220304_calibration.mov 2nd"
 # check_calibration(calibrations, suspect_calibration)
 
 # Tracking
-df = CSV.read(joinpath(data_path, "runs.csv"), DataFrame)
+df = CSV.read(runs_file, DataFrame)
 
 # data quality checks
 for row in eachrow(df)
     @assert row.start ≤ row.POI ≤ row.stop "POI is not within the track in row $row"
     @assert row.calibration_id ∈ calibrations.calibration_id "Calibration $calibration_id is missing from the calibrations file."
-    file = joinpath(data_path, row.path, row.file)
+    file = joinpath(row.path, row.file)
     @assert isfile(file) "run file $file does not exist"
     # @assert that the time stamps are within the period of the video
 end
 
-df.track = tmap(track, joinpath.(data_path, df.path, df.file), df.start, df.stop)
+df.track = tmap(track, joinpath.(df.path, df.file), df.start, df.stop)
 
 # Combine the two
 leftjoin!(df, calibrations, on = :calibration_id)
