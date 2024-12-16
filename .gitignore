@@ -1,4 +1,7 @@
+tracks and calibrations/
 *.pdf
 *.mp4
 *.png
 *.csv
+*.calib
+

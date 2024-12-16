@@ -3,43 +3,59 @@ tosecond(t::T) where {T <: TimePeriod} = t / convert(T, Dates.Second(1))
 
 SimpTrack.track(file, start::Time, stop::Time; kwargs...) = track(file, tosecond(start), tosecond(stop); kwargs...)
 
-function calibrate_smooth(clb, trk; s = 100, k = 2)
+function get_smooth_calibrate(clb, trk, s, k)
     t, xy = trk
     xy = clb.itform.(xy)
     # smooth 
     XY = reshape(collect(Iterators.flatten(xy)), 2, :)
     spl = ParametricSpline(t, XY; s, k)
-    return spl
+    return SV ∘ spl ∘ tosecond
 end
 
-
-function rotate_trim(start, stop, POI, spl; cutoff = 50)
-    # resample
-    t = range(tosecond(start), tosecond(stop), round(Int, 30tosecond(stop - start))) # 30 fps
-    xy = SV.(spl.(t))
-
+function get_rotation(start, POI, spl)
     # center and rotate
-    trans = Translation(-xy[1])
-    p1 = xy[1]
-    i = findfirst(≥(tosecond(POI)), t)
-    p2 = xy[i]
+    p1 = spl(start)
+    p2 = spl(POI)
+    trans = Translation(-p1)
     x, y = normalize(p2 - p1)
     θ = π/2 - atan(y, x)
     rot = recenter(LinearMap(Angle2d(θ)), p1)
-    cmp = trans ∘ rot
-    xy .= cmp.(xy)
-
-    # trim
-    n = length(xy)
-    j = findfirst(>(cutoff) ∘ norm, xy)
-    if !isnothing(j)
-        @assert j ≥ i "The trimming cutoff must be larger than the POI, $i"
-        xy = xy[1:j - 1]
-        t = t[1:j - 1]
-    end
-
-    return (; t, i, xy)
+    return trans ∘ rot
 end
+
+function get_transformation(clb, trk, start, POI; s = 100, k = 2)
+    spl = get_smooth_calibrate(clb, trk, s, k)
+    trans = get_rotation(start, POI, spl)
+    return trans ∘ spl
+end
+
+# function rotate_trim(start, stop, POI, spl; cutoff = 50)
+#     # resample
+#     t = range(tosecond(start), tosecond(stop), round(Int, 30tosecond(stop - start))) # 30 fps
+#     xy = SV.(spl.(t))
+#
+#     # center and rotate
+#     trans = Translation(-xy[1])
+#     p1 = xy[1]
+#     i = findfirst(≥(tosecond(POI)), t)
+#     p2 = xy[i]
+#     x, y = normalize(p2 - p1)
+#     θ = π/2 - atan(y, x)
+#     rot = recenter(LinearMap(Angle2d(θ)), p1)
+#     cmp = trans ∘ rot
+#     xy .= cmp.(xy)
+#
+#     # trim
+#     n = length(xy)
+#     j = findfirst(>(cutoff) ∘ norm, xy)
+#     if !isnothing(j)
+#         @assert j ≥ i "The trimming cutoff must be larger than the POI, $i"
+#         xy = xy[1:j - 1]
+#         t = t[1:j - 1]
+#     end
+#
+#     return (; t, i, xy)
+# end
 
 # function plotit(name, start, stop, spline)
 #     fig = Figure();
@@ -117,15 +133,42 @@ end
 # tortuosity(xy::Vector{SV}) = cordlength(xy) / curvelength(xy)
 
 
-function angle_between(oldu, newu)
-  x1, y1 = oldu
-  x2, y2 = newu
-  sign((x2 - x1)*(y2 + y1))*angle(oldu, newu)
+
+function angle_between(p1, p2)
+    θ = acos(dot(p1, p2) / norm(p1) / norm(p2))
+    return -sign(cross(p1, p2))*θ
 end
 
-cumulative_angle(rotated) = cumulative_angle(rotated.xy[rotated.i:end])
-function cumulative_angle(xy::Vector{SV})
+function cumulative_angle(f, t1, t2)
+    xy = f.(range(t1, t2; step = Second(1)))
     δ = filter(!iszero ∘ sum, diff(xy))
-    # δ = filter(!iszero ∘ sum, diff(transfrm.(range(t1, t2, 1000))))
-    rad2deg(sum(splat(angle_between), partition(δ, 2, 1)))
+    α = sum(splat(angle_between) ∘ reverse, partition(δ, 2, 1); init=0.0)
+    rad2deg(α)
 end
+
+# cumulative_angle(rotated) = cumulative_angle(rotated.xy[rotated.i:end])
+# function cumulative_angle(xy::Vector{SV})
+#     δ = filter(!iszero ∘ sum, diff(xy[1:60:end])) # cause 30 fps
+#     α = sum(splat(angle_between) ∘ reverse, partition(δ, 2, 1); init=0.0)
+#     rad2deg(α)
+# end
+
+
+
+
+# function angle_between(oldu, newu)
+#   x1, y1 = oldu
+#   x2, y2 = newu
+#   sign((x2 - x1)*(y2 + y1))*angle(oldu, newu)
+# end
+#
+# cumulative_angle(rotated) = cumulative_angle(rotated.xy[rotated.i:end])
+# function cumulative_angle(xy::Vector{SV})
+#     δ = filter(!iszero ∘ sum, diff(xy))
+#     if isempty(δ)
+#         0.0
+#     else
+#         # δ = filter(!iszero ∘ sum, diff(transfrm.(range(t1, t2, 1000))))
+#         rad2deg(sum(splat(angle_between), partition(δ, 2, 1); init = 0.0))
+#     end
+# end
