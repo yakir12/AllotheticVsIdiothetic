@@ -1,4 +1,6 @@
-tracks and calibrations/
+tracks and calibrations
+.CondaPkg
+track
 *.pdf
 *.mp4
 *.png
