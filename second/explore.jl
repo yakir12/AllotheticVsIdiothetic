@@ -35,7 +35,8 @@ transform!(runs, :POI => ByRow(passmissing(tosecond)); renamecols = false)
 calibs = CSV.read(joinpath(results_dir, "calibs.csv"), DataFrame)
 # minimal work requred
 transform!(calibs, :calibration_id => ByRow(get_calibration) => :rectify)
-transform!(calibs, [:rectify, :center_ij, :north_ij] => ByRow((f, c, n) -> [f(totuple(c)), f(totuple(n))]) => [:center, :north])
+transform!(calibs, [:rectify, :center_ij] => ByRow((f, c) -> passmissing(f)(totuple(c))) => :center)
+transform!(calibs, [:rectify, :north_ij] => ByRow((f, c) -> passmissing(f)(totuple(c))) => :north)
 select!(calibs, Cols(:calibration_id, :rectify, :center, :north))
 leftjoin!(runs, calibs, on = :calibration_id)
 select!(runs, Not(:runs_path, :start_location, :calibration_id, :fps, :target_width, :runs_file, :window_size))
@@ -111,13 +112,16 @@ end
 
 
 df = combine(groupby(runs, :run_id), [:north, :center] .=> Ref ∘ first, [:tij_file, :start, :POI, :stop, :rectify] => Ref ∘ concatenate => [:t, :xy, :poi], keepkeys = true, renamecols = false)
-dropmissing!(df)
+dropmissing!(df, :poi)
 transform!(df, [:t, :xy] => ByRow(smooth); renamecols = false)
-transform!(df, [:north, :center, :xy] => register!; renamecols = false)
+transform!(df, [:north, :center, :xy] => passmissing(register!); renamecols = false)
 
 
-
+if isdir("tracks")
+    rm("tracks", recursive=true)
+end
 mkpath("tracks")
+
 @tasks for row in eachrow(df)
     fig  = Figure()
     ax = Axis(fig[1,1], aspect = DataAspect())
