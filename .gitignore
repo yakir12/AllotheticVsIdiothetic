@@ -1,6 +1,7 @@
 tracks and calibrations
 .CondaPkg
 track
+Manifest.toml
 *.pdf
 *.mp4
 *.png
