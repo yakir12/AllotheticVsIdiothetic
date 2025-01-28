@@ -1,4 +1,4 @@
-# using GLMakie
+using AlgebraOfGraphics, GLMakie
 using CairoMakie
 
 using Dates, LinearAlgebra
@@ -23,7 +23,7 @@ function get_calibration(calibration_id)
     rectification(c)
 end
 
-const results_dir = "../first/tracks and calibrations"
+const results_dir = "../indoors/tracks and calibrations"
 
 # TODO: make sure you're not doing things double (like for the same row_number)
 # maybe appply the register earlier
@@ -31,7 +31,7 @@ const results_dir = "../first/tracks and calibrations"
 # maybe save in first the name of the csv files, complete, and the ones for the calibration too, just for ease of loading
 
 runs = CSV.read(joinpath(results_dir, "runs.csv"), DataFrame)
-transform!(runs, :POI => ByRow(passmissing(tosecond)); renamecols = false)
+# transform!(runs, :POI => ByRow(passmissing(tosecond)); renamecols = false)
 calibs = CSV.read(joinpath(results_dir, "calibs.csv"), DataFrame)
 # minimal work requred
 transform!(calibs, :calibration_id => ByRow(get_calibration) => :rectify)
@@ -42,36 +42,19 @@ leftjoin!(runs, calibs, on = :calibration_id)
 select!(runs, Not(:runs_path, :start_location, :calibration_id, :fps, :target_width, :runs_file, :window_size))
 rename!(runs, :runs_start => :start, :runs_stop => :stop)
 
-# trying to remove that weird run
-deleteat!(runs, 7:8)
 
-function get_txy(tij_file, start, ::Missing, stop, rectify)
+function get_txy(tij_file, rectify)
     tij = CSV.File(joinpath(results_dir, tij_file))
     t = range(tij.t[1], tij.t[end], length = length(tij))
     xy = rectify.(SVector{2, Int}.(tij.i, tij.j))
-    return [(; t, xy)]
+    return (; t, xy)
 end
-function get_txy(tij_file, start, POI, stop, rectify)
-    tij = CSV.File(joinpath(results_dir, tij_file))
-    t = range(tij.t[1], tij.t[end], length = length(tij))
-    xy = rectify.(SVector{2, Int}.(tij.i, tij.j))
-    i1 = something(findfirst(≥(start), t), 1)
-    i2 = something(findfirst(≥(POI), t), length(t))
-    i3 = something(findfirst(≥(stop), t), length(t))
-    t1 = t[i1:i2]
-    xy1 = xy[i1:i2]
-    t2 = t[i2:i3]
-    xy2 = xy[i2:i3]
-    return [(; t = t1, xy = xy1), (; t = t2, xy = xy2)]
-end
-
-function smooth(t, xy)
-    tp = ParametricSpline(t, stack(xy); k = 1, s = 5000)
-    ts = range(t[1], t[end]; step = 1/1)
+function smooth_track(t, xy, k = 1, s = 0)
+    tp = ParametricSpline(t, stack(xy); k, s)
+    ts = range(t[1], t[end]; step = 1/30)
     sxy = SVector{2, Float64}.(tp.(ts))
-    return (; t, xy = sxy)
+    return (; t = ts, xy = sxy)
 end
-
 function center_and_rotate(p1, p2)
     trans = Translation(-p1)
     x, y = normalize(p2 - p1)
@@ -79,42 +62,49 @@ function center_and_rotate(p1, p2)
     rot = recenter(LinearMap(Angle2d(θ)), p1)
     return  trans ∘ rot
 end
-function register!(norths, centers, xys)
-    p1 = first(centers)
-    p2 = last(first(xys))
-    trans = center_and_rotate(p1, p2)
-    norths .= trans.(norths)
-    centers .= trans.(centers)
-    for xy in xys
-        xy .= trans.(xy)
+function register!(north, center, xy, poi_index)
+    p1 = xy[1]
+    p2 = xy[poi_index]
+    trans = passmissing(center_and_rotate(p1, p2))
+    map!(trans, xy, xy)
+    (; north = trans(north), center = trans(center), xy = xy)
+end
+
+
+transform!(runs, [:tij_file, :rectify] => ByRow(get_txy) => [:t, :xy])
+transform!(runs, [:t, :poi] => ByRow((t, poi) -> something(findfirst(>(poi), t), length(t))) => :poi_index)
+
+
+############# smoothing  
+
+CairoMakie.activate!()
+@tasks for row in eachrow(runs)
+    fig  = Figure()
+    ax = Axis(fig[1,1], aspect = DataAspect(), title = string(row.run_id))#, limits = ((-51, 51), (-51, 51)))
+    for r  in (30, 50)
+        lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
     end
-end
-
-function get_txy(tij_file, start, stop, rectify)
-    tij = CSV.File(joinpath(results_dir, tij_file))
-    t = range(tij.t[1], tij.t[end], length = length(tij))
-    xy = rectify.(SVector{2, Int}.(tij.i, tij.j))
-    return (; t, xy)
-end
-function concatenate(tij_files, starts, POIs, stops, rectifies)
-    if length(POIs) > 1
-        a = get_txy.(tij_files, starts, stops, rectifies)
-        xy = vcat(getfield.(a, :xy)...)
-        t = range(0; length = length(xy), step = step(a[1].t))
-        l = length(a[1].t)
-        (; t, xy, POI = t[l])
-    else
-        a = only(get_txy.(tij_files, starts, stops, rectifies))
-        t = range(0; step = step(a.t), length = length(a.t))
-        (; t, xy = a.xy, POI = POIs[])
+    for k = 1:4, s = (0, 500, 1000)
+        s_t, s_xy = smooth_track(row.t, row.xy, k, s)
+        _, _, r_xy = register!(row.north, row.center, s_xy, row.poi_index)
+        lines!(ax, r_xy[1:poi_index])
+        lines!(ax, r_xy[poi_index:end]; label = (;k, s))
     end
+    save(joinpath("tracks", string(row.run_id, ".png")), fig)
 end
 
 
-df = combine(groupby(runs, :run_id), [:north, :center] .=> Ref ∘ first, [:tij_file, :start, :POI, :stop, :rectify] => Ref ∘ concatenate => [:t, :xy, :poi], keepkeys = true, renamecols = false)
-dropmissing!(df, :poi)
-transform!(df, [:t, :xy] => ByRow(smooth); renamecols = false)
-transform!(df, [:north, :center, :xy] => passmissing(register!); renamecols = false)
+
+
+
+transform!(runs, [:t, :xy] => ByRow(smooth_track) => [:t, :xy])
+transform!(runs, [:north, :center, :xy, :poi_index] => ByRow(register!) => [:north, :center, :xy])
+
+
+
+
+
+
 
 
 if isdir("tracks")
@@ -122,15 +112,77 @@ if isdir("tracks")
 end
 mkpath("tracks")
 
-@tasks for row in eachrow(df)
+
+
+CairoMakie.activate!()
+@tasks for row in eachrow(runs)
     fig  = Figure()
-    ax = Axis(fig[1,1], aspect = DataAspect())
-    for r  in (300, 500)
+    ax = Axis(fig[1,1], aspect = DataAspect(), title = string(row.run_id))#, limits = ((-51, 51), (-51, 51)))
+    for r  in (30, 50)
         lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
     end
-    lines!(ax, row.xy)
+    lines!(ax, row.xy[1:row.poi_index])
+    lines!(ax, row.xy[row.poi_index:end])
     save(joinpath("tracks", string(row.run_id, ".png")), fig)
 end
+
+GLMakie.activate!()
+
+fig  = Figure(size = (1000,1000))
+ax = Axis(fig[1,1], aspect = DataAspect())
+for r  in (30, 50)
+    lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
+end
+for row in eachrow(runs)
+    lines!(ax, row.xy[1:row.poi_index], color = :blue)
+    lines!(ax, row.xy[row.poi_index:end], color = :red)
+    text!(ax, row.xy[end]..., text = string(row.run_id))
+end
+save(joinpath("tracks", "all.png"), fig)
+
+words = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth", "eleventh", "twelfth"]
+
+transform!(runs, :dance => ByRow(x -> x ? "dance" : "no dance"), :at_run => ByRow(x -> words[x]), renamecols = false)
+
+function cropto(xy, l)
+    i = something(findfirst(>(l) ∘ norm, xy), length(xy))
+    xy[1:i-1]
+end
+
+transform!(runs, :xy => ByRow(xy -> cropto(xy, 50)); renamecols = false)
+
+df1 = flatten(runs, :xy)
+transform!(df1, :xy => [:x, :y])
+
+plt = data(df1) * mapping(:x => "X (cm)", :y => "Y (cm)", group=:run_id => nonnumeric, col = :dance => nonnumeric, row = :at_run => nonnumeric => "at run", color = :light) * visual(Lines)
+fig = draw(plt; axis=(aspect=1, ))
+for ax in fig.figure.content 
+    if ax isa Axis
+        for r  in (30, 50)
+            lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
+        end
+    end
+end
+
+save("figure1.png", fig)
+
+# display(fig)
+
+
+
+plt = data(df1) * mapping(:x => "X (cm)", :y => "Y (cm)", group=:run_id => nonnumeric, col = :dance => nonnumeric, row = :light => nonnumeric => "at run", color = :at_run) * visual(Lines)
+fig = draw(plt; axis=(aspect=1, ))
+for ax in fig.figure.content 
+    if ax isa Axis
+        for r  in (30, 50)
+            lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
+        end
+    end
+end
+
+save("figure2.png", fig)
+
+# display(fig)
 
 
 #
