@@ -42,6 +42,69 @@ leftjoin!(runs, calibs, on = :calibration_id)
 select!(runs, Not(:runs_path, :start_location, :calibration_id, :fps, :target_width, :runs_file, :window_size))
 rename!(runs, :runs_start => :start, :runs_stop => :stop)
 
+function get_txy(tij_file, rectify, poi)
+    tij = CSV.File(joinpath(results_dir, tij_file))
+    t = range(tij.t[1], tij.t[end], length = length(tij))
+    poi_index = something(findfirst(>(poi), t), length(t))
+    ij = SVector{2, Int}.(tij.i, tij.j)
+    xy = rectify.(ij)
+    (; poi_index, t, xy)
+end
+transform!(runs, [:tij_file, :rectify, :poi] => ByRow(get_txy) => [:poi_index, :t, :xy])
+
+
+
+function smooth_track(t, xy, k, s)
+    tp = ParametricSpline(t, stack(xy); k, s)
+    return SVector{2, Float64}.(tp.(t))
+end
+function plotone(run_id, t, xy, poi_index)
+    fig  = Figure(size = (2000, 2000))
+    ax = Axis(fig[1,1], aspect = DataAspect(), autolimitaspect = 1, title = string(run_id))#, limits = ((-51, 51), (-51, 51)))
+    scatterlines!(ax, xy, color = :black, linewidth = 1, markersize = 3)
+    for s in (10, 200, 500)
+        sxy = smooth_track(t, xy, 2, s)
+        lines!(ax, sxy, linewidth = 1, alpha = 0.75, label = string(s))
+        scatter!(ax, sxy[poi_index])
+    end
+    Legend(fig[1,2], ax, "Smoothing")
+    save(joinpath("tracks", string(run_id, ".png")), fig)
+end
+if isdir("tracks")
+    rm("tracks", recursive=true)
+end
+mkpath("tracks")
+CairoMakie.activate!()
+@tasks for row in eachrow(runs)
+    plotone(row.run_id, row.t, row.xy, row.poi_index)
+end
+
+
+
+kasjdhfgkjsdhfgskfhgak
+
+
+
+
+function get_rotation(xy)
+    # p1 = first(xy)
+    # p2 = last(xy)
+    # x, y = normalize(p2 - p1)
+    # θ = π/2 - atan(y, x)
+    p, _ = [first.(xy) ones(length(xy))] \ last.(xy)
+    θ = atan(p)
+    θ = π/2 - θ
+    # θ = sign(θ) < 0 ? θ + π : θ
+    LinearMap(Angle2d(θ))
+end
+
+
+
+
+
+
+
+
 
 function get_txy(tij_file, rectify)
     tij = CSV.File(joinpath(results_dir, tij_file))
