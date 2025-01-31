@@ -40,20 +40,78 @@ transform!(calibs, [:rectify, :north_ij] => ByRow((f, c) -> passmissing(f)(totup
 select!(calibs, Cols(:calibration_id, :rectify, :center, :north))
 leftjoin!(runs, calibs, on = :calibration_id)
 select!(runs, Not(:runs_path, :start_location, :calibration_id, :fps, :target_width, :runs_file, :window_size))
-rename!(runs, :runs_start => :start, :runs_stop => :stop)
 
+function get_rotation(xy)
+    # θ = -atan(reverse(sum(normalize, xy))...)
+    # p1 = first(xy)
+    # p2 = last(xy)
+    # x, y = normalize(p2 - p1)
+    # θ = π/2 - atan(y, x)
+    p = first.(xy) \ last.(xy)
+    θ = atan(p)
+    if sum(last, xy) > 0
+        θ += π
+    end
+    θ = π/2 - θ
+    LinearMap(Angle2d(θ))
+end
 function get_txy(tij_file, rectify, poi)
     tij = CSV.File(joinpath(results_dir, tij_file))
     t = range(tij.t[1], tij.t[end], length = length(tij))
     poi_index = something(findfirst(>(poi), t), length(t))
     ij = SVector{2, Int}.(tij.i, tij.j)
     xy = rectify.(ij)
+    tp = ParametricSpline(t, stack(xy); k = 2, s = 300)
+    xy .= SVector{2, Float64}.(tp.(t))
+    trans = Translation(-xy[1])
+    xy .= trans.(xy)
+    # rot = get_rotation(xy[2:poi_index])
+    # xy .= rot.(xy)
     (; poi_index, t, xy)
 end
 transform!(runs, [:tij_file, :rectify, :poi] => ByRow(get_txy) => [:poi_index, :t, :xy])
+model(x, p) = p[1]*x .+ p[2]
+function plotone(run_id, xy, poi_index)
+    fig  = Figure()
+    ax = Axis(fig[1,1], aspect = DataAspect(), autolimitaspect = 1, title = string(run_id))#, limits = ((-51, 51), (-51, 51)))
+    scatter!(ax, xy[1:poi_index])
+    lines!(ax, xy[poi_index:end])
+    p0 = [first.(xy[1:poi_index]) ones(poi_index)] \ last.(xy[1:poi_index])
+    res = linearfitxy(first.(xy[1:poi_index]), last.(xy[1:poi_index]))
+    b = res.a
+    a = res.b
+    ablines!(ax, b, a, color = :gray)
+    save(joinpath("tracks", string(run_id, ".png")), fig)
+end
+if isdir("tracks")
+    rm("tracks", recursive=true)
+end
+mkpath("tracks")
+CairoMakie.activate!()
+@tasks for row in eachrow(runs)
+    plotone(row.run_id, row.xy, row.poi_index)
+end
 
 
 
+
+
+
+
+
+
+
+function get_rotation(xy)
+    # p1 = first(xy)
+    # p2 = last(xy)
+    # x, y = normalize(p2 - p1)
+    # θ = π/2 - atan(y, x)
+    p, _ = [first.(xy) ones(length(xy))] \ last.(xy)
+    θ = atan(p)
+    θ = π/2 - θ
+    # θ = sign(θ) < 0 ? θ + π : θ
+    LinearMap(Angle2d(θ))
+end
 function smooth_track(t, xy, k, s)
     tp = ParametricSpline(t, stack(xy); k, s)
     return SVector{2, Float64}.(tp.(t))
@@ -62,8 +120,8 @@ function plotone(run_id, t, xy, poi_index)
     fig  = Figure(size = (2000, 2000))
     ax = Axis(fig[1,1], aspect = DataAspect(), autolimitaspect = 1, title = string(run_id))#, limits = ((-51, 51), (-51, 51)))
     scatterlines!(ax, xy, color = :black, linewidth = 1, markersize = 3)
-    for s in (100, 200, 500)
-        sxy = smooth_track(t, xy, 2, s)
+    for s in (150, 300, 400)
+        sxy = smooth_track(t, xy, 3, s)
         lines!(ax, sxy, linewidth = 1, alpha = 0.75, label = string(s))
         scatter!(ax, sxy[poi_index])
     end

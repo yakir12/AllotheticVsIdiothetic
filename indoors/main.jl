@@ -4,6 +4,7 @@ using Fromage
 
 # data_path = "/media/yakir/205D-185A/Bastien's"
 data_path = "/home/yakir/mnt/dacke_lab_data/Data/Elin/Project_AllotheticVsIdiothetic_indoors" # took about 17 minutes
+data_path = "/media/yakir/T9/elin"
 # data_path = "/home/yakir/mnt/dacke_lab_data/Data/Elin/Project_AllotheticVsIdiothetic_outdoors_50cm"
 # data_path = "/home/yakir/mnt/dacke_lab_data/Data/2024/South Africa 2024 Nov/Bastien"
 # data_path = "/media/yakir/3A82C7D782C79633/Bastien's backup"
