@@ -43,16 +43,17 @@ select!(runs, Not(:runs_path, :start_location, :calibration_id, :fps, :target_wi
 
 function get_rotation(xy)
     # θ = -atan(reverse(sum(normalize, xy))...)
-    # p1 = first(xy)
-    # p2 = last(xy)
-    # x, y = normalize(p2 - p1)
-    # θ = π/2 - atan(y, x)
-    p = first.(xy) \ last.(xy)
-    θ = atan(p)
-    if sum(last, xy) > 0
-        θ += π
-    end
-    θ = π/2 - θ
+    # θ = -atan(reverse(sum(normalize, xy))...)
+    p1 = first(xy)
+    p2 = last(xy)
+    x, y = normalize(p2 - p1)
+    θ = π/2 - atan(y, x)
+    # p = first.(xy) \ last.(xy)
+    # θ = atan(p)
+    # if sum(last, xy) > 0
+    #     θ += π
+    # end
+    # θ = π/2 - θ
     LinearMap(Angle2d(θ))
 end
 function get_txy(tij_file, rectify, poi)
@@ -65,22 +66,23 @@ function get_txy(tij_file, rectify, poi)
     xy .= SVector{2, Float64}.(tp.(t))
     trans = Translation(-xy[1])
     xy .= trans.(xy)
-    # rot = get_rotation(xy[2:poi_index])
-    # xy .= rot.(xy)
+    rot = get_rotation(xy[2:poi_index])
+    xy .= rot.(xy)
     (; poi_index, t, xy)
 end
 transform!(runs, [:tij_file, :rectify, :poi] => ByRow(get_txy) => [:poi_index, :t, :xy])
-model(x, p) = p[1]*x .+ p[2]
 function plotone(run_id, xy, poi_index)
     fig  = Figure()
-    ax = Axis(fig[1,1], aspect = DataAspect(), autolimitaspect = 1, title = string(run_id))#, limits = ((-51, 51), (-51, 51)))
-    scatter!(ax, xy[1:poi_index])
+    ax = Axis(fig[1,1], aspect = DataAspect(), autolimitaspect = 1, title = string(run_id), limits = ((-60, 60), (-60, 60)))
+    for r  in (30, 50)
+        lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
+    end
+    lines!(ax, xy[1:poi_index])
     lines!(ax, xy[poi_index:end])
-    p0 = [first.(xy[1:poi_index]) ones(poi_index)] \ last.(xy[1:poi_index])
-    res = linearfitxy(first.(xy[1:poi_index]), last.(xy[1:poi_index]))
-    b = res.a
-    a = res.b
-    ablines!(ax, b, a, color = :gray)
+    # θ = atan(reverse(sum(normalize, xy[2:poi_index]))...)
+    # arrows!(ax, [0], [0], [cos(θ)], [sin(θ)], lengthscale = 10)
+    # a, b = [first.(xy[1:poi_index]) ones(poi_index)] \ last.(xy[1:poi_index])
+    # ablines!(ax, b, a, color = :gray)
     save(joinpath("tracks", string(run_id, ".png")), fig)
 end
 if isdir("tracks")
@@ -97,169 +99,7 @@ end
 
 
 
-
-
-
-
-function get_rotation(xy)
-    # p1 = first(xy)
-    # p2 = last(xy)
-    # x, y = normalize(p2 - p1)
-    # θ = π/2 - atan(y, x)
-    p, _ = [first.(xy) ones(length(xy))] \ last.(xy)
-    θ = atan(p)
-    θ = π/2 - θ
-    # θ = sign(θ) < 0 ? θ + π : θ
-    LinearMap(Angle2d(θ))
-end
-function smooth_track(t, xy, k, s)
-    tp = ParametricSpline(t, stack(xy); k, s)
-    return SVector{2, Float64}.(tp.(t))
-end
-function plotone(run_id, t, xy, poi_index)
-    fig  = Figure(size = (2000, 2000))
-    ax = Axis(fig[1,1], aspect = DataAspect(), autolimitaspect = 1, title = string(run_id))#, limits = ((-51, 51), (-51, 51)))
-    scatterlines!(ax, xy, color = :black, linewidth = 1, markersize = 3)
-    for s in (150, 300, 400)
-        sxy = smooth_track(t, xy, 3, s)
-        lines!(ax, sxy, linewidth = 1, alpha = 0.75, label = string(s))
-        scatter!(ax, sxy[poi_index])
-    end
-    Legend(fig[1,2], ax, "Smoothing")
-    save(joinpath("tracks", string(run_id, ".png")), fig)
-end
-if isdir("tracks")
-    rm("tracks", recursive=true)
-end
-mkpath("tracks")
-CairoMakie.activate!()
-@tasks for row in eachrow(runs)
-    plotone(row.run_id, row.t, row.xy, row.poi_index)
-end
-
-
-
-kasjdhfgkjsdhfgskfhgak
-
-
-
-
-function get_rotation(xy)
-    # p1 = first(xy)
-    # p2 = last(xy)
-    # x, y = normalize(p2 - p1)
-    # θ = π/2 - atan(y, x)
-    p, _ = [first.(xy) ones(length(xy))] \ last.(xy)
-    θ = atan(p)
-    θ = π/2 - θ
-    # θ = sign(θ) < 0 ? θ + π : θ
-    LinearMap(Angle2d(θ))
-end
-
-
-
-
-
-
-
-
-
-function get_txy(tij_file, rectify)
-    tij = CSV.File(joinpath(results_dir, tij_file))
-    t = range(tij.t[1], tij.t[end], length = length(tij))
-    xy = rectify.(SVector{2, Int}.(tij.i, tij.j))
-    return (; t, xy)
-end
-function smooth_track(t, xy, k = 1, s = 0)
-    tp = ParametricSpline(t, stack(xy); k, s)
-    ts = range(t[1], t[end]; step = 1/30)
-    sxy = SVector{2, Float64}.(tp.(ts))
-    return (; t = ts, xy = sxy)
-end
-function center_and_rotate(p1, p2)
-    trans = Translation(-p1)
-    x, y = normalize(p2 - p1)
-    θ = π/2 - atan(y, x)
-    rot = recenter(LinearMap(Angle2d(θ)), p1)
-    return  trans ∘ rot
-end
-function register!(north, center, xy, poi_index)
-    p1 = xy[1]
-    p2 = xy[poi_index]
-    trans = passmissing(center_and_rotate(p1, p2))
-    map!(trans, xy, xy)
-    (; north = trans(north), center = trans(center), xy = xy)
-end
-
-
-transform!(runs, [:tij_file, :rectify] => ByRow(get_txy) => [:t, :xy])
-transform!(runs, [:t, :poi] => ByRow((t, poi) -> something(findfirst(>(poi), t), length(t))) => :poi_index)
-
-
-############# smoothing  
-
-CairoMakie.activate!()
-@tasks for row in eachrow(runs)
-    fig  = Figure()
-    ax = Axis(fig[1,1], aspect = DataAspect(), title = string(row.run_id))#, limits = ((-51, 51), (-51, 51)))
-    for r  in (30, 50)
-        lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
-    end
-    for k = 1:4, s = (0, 500, 1000)
-        s_t, s_xy = smooth_track(row.t, row.xy, k, s)
-        _, _, r_xy = register!(row.north, row.center, s_xy, row.poi_index)
-        lines!(ax, r_xy[1:poi_index])
-        lines!(ax, r_xy[poi_index:end]; label = (;k, s))
-    end
-    save(joinpath("tracks", string(row.run_id, ".png")), fig)
-end
-
-
-
-
-
-transform!(runs, [:t, :xy] => ByRow(smooth_track) => [:t, :xy])
-transform!(runs, [:north, :center, :xy, :poi_index] => ByRow(register!) => [:north, :center, :xy])
-
-
-
-
-
-
-
-
-if isdir("tracks")
-    rm("tracks", recursive=true)
-end
-mkpath("tracks")
-
-
-
-CairoMakie.activate!()
-@tasks for row in eachrow(runs)
-    fig  = Figure()
-    ax = Axis(fig[1,1], aspect = DataAspect(), title = string(row.run_id))#, limits = ((-51, 51), (-51, 51)))
-    for r  in (30, 50)
-        lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
-    end
-    lines!(ax, row.xy[1:row.poi_index])
-    lines!(ax, row.xy[row.poi_index:end])
-    save(joinpath("tracks", string(row.run_id, ".png")), fig)
-end
-
 GLMakie.activate!()
-
-fig  = Figure(size = (1000,1000))
-ax = Axis(fig[1,1], aspect = DataAspect())
-for r  in (30, 50)
-    lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
-end
-for row in eachrow(runs)
-    lines!(ax, row.xy[1:row.poi_index], color = :blue)
-    lines!(ax, row.xy[row.poi_index:end], color = :red)
-    text!(ax, row.xy[end]..., text = string(row.run_id))
-end
-save(joinpath("tracks", "all.png"), fig)
 
 words = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth", "eleventh", "twelfth"]
 
@@ -302,6 +142,83 @@ for ax in fig.figure.content
 end
 
 save("figure2.png", fig)
+
+function get_spline(tij_file, rectify, poi)
+    tij = CSV.File(joinpath(results_dir, tij_file))
+    t = range(tij.t[1], tij.t[end], length = length(tij))
+    poi_index = something(findfirst(>(poi), t), length(t))
+    ij = SVector{2, Int}.(tij.i, tij.j)
+    xy = rectify.(ij)
+    (;t, spl = ParametricSpline(t, stack(xy); k = 2, s = 300), poi_index)
+end
+df = select(runs, [:tij_file, :rectify, :poi] => ByRow(get_spline) => [:t, :spl, :poi_index], Cols(:run_id, :dance, :light, :at_run))
+
+using Statistics
+mean_angle(θ) = angle(mean(exp, θ*im))
+
+function unwrap!(x, period = 2π)
+	y = convert(eltype(x), period)
+	v = first(x)
+	@inbounds for k = eachindex(x)
+		x[k] = v = v + rem(x[k] - v,  y, RoundNearest)
+	end
+end
+
+function plot_direction(poi_index, spl, t, run_id)
+    # row = df[2,:]
+    # poi_index = row.poi_index
+    # spl = row.spl
+    # t = row.t
+    # run_id = row.run_id
+    # GLMakie.activate!()
+    der = derivative.(Ref(spl), t)
+    fig = Figure()
+    ax = Axis(fig[1,1], autolimitaspect = 1, aspect = DataAspect(), xlabel = "X (cm)", ylabel = "Y (cm)")
+    lines!(ax, Point2f.(spl.(t[1:poi_index])))
+    lines!(ax, Point2f.(spl.(t[poi_index:end])))
+    ax = Axis(fig[2,1], limits = (extrema(t), nothing), xlabel = "Time (sec)", ylabel = "Direction (°)")
+    θ = [atan(reverse(d)...) for d in der]
+    unwrap!(θ)
+    lines!(ax, t[1:poi_index], rad2deg.(θ[1:poi_index]))
+    lines!(ax, t[poi_index:end], rad2deg.(θ[poi_index:end]))
+    θs = [mean_angle(θ[i]) for i in (1:poi_index, poi_index:length(t))]
+    lines!(ax, t[[1, poi_index, poi_index, end]], [fill(rad2deg(θs[1]), 2); fill(rad2deg(θs[2]), 2)], color=:gray)
+    ax = Axis(fig[3,1], limits = (extrema(t), nothing), xlabel = "Time (sec)", ylabel = "Difference in direction (°)")
+    lines!(ax, t[2:end], diff(θ))
+    display(fig)
+    # save(joinpath("directions", string(run_id, ".png")), fig)
+end
+
+row = df[15,:]
+plot_direction(row.poi_index, row.spl, row.t, row.run_id)
+
+
+if isdir("directions")
+    rm("directions", recursive=true)
+end
+mkpath("directions")
+CairoMakie.activate!()
+@tasks for row in eachrow(df)
+    plot_direction(row.poi_index, row.spl, row.t, row.run_id)
+end
+
+    GLMakie.activate!()
+function turning_event(t, spl, poi_index)
+    der = derivative.(Ref(spl), t)
+    θ = [atan(reverse(d)...) for d in der]
+    # d, i = findmax(diff(θ[poi_index:end]))
+    d, i = findmax(abs.(diff(θ)))
+    # (; d, dt = t[i + poi_index - 1] - t[poi_index])
+    (; d = rad2deg(d), dt = t[i] - t[poi_index])
+end
+df = select(runs, [:tij_file, :rectify, :poi] => ByRow(get_spline) => [:t, :spl, :poi_index], Cols(:run_id, :dance, :light, :at_run));
+transform!(df, [:t, :spl] => ByRow(turning_event) => [:d, :dt]);
+plt = data(df) * mapping(:dt => "Time from POI (sec)", :d => "Turn (°)", col = :dance => nonnumeric, row = :light => nonnumeric => "at run", color = :at_run) * visual(Scatter)
+fig = draw(plt)
+
+
+
+
 
 # display(fig)
 
