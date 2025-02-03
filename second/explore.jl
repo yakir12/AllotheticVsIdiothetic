@@ -40,6 +40,8 @@ transform!(calibs, [:rectify, :north_ij] => ByRow((f, c) -> passmissing(f)(totup
 select!(calibs, Cols(:calibration_id, :rectify, :center, :north))
 leftjoin!(runs, calibs, on = :calibration_id)
 select!(runs, Not(:runs_path, :start_location, :calibration_id, :fps, :target_width, :runs_file, :window_size))
+words = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth", "eleventh", "twelfth"]
+transform!(runs, :dance => ByRow(x -> x ? "dance" : "no dance"), :at_run => ByRow(x -> words[x]), renamecols = false)
 
 function get_rotation(xy)
     # θ = -atan(reverse(sum(normalize, xy))...)
@@ -151,7 +153,55 @@ function get_spline(tij_file, rectify, poi)
     xy = rectify.(ij)
     (;t, spl = ParametricSpline(t, stack(xy); k = 2, s = 300), poi_index)
 end
+
 df = select(runs, [:tij_file, :rectify, :poi] => ByRow(get_spline) => [:t, :spl, :poi_index], Cols(:run_id, :dance, :light, :at_run))
+
+# questions:
+# 1. how much did they turn overall
+# 2. how much of it hapened in the first x seconds from the light introduction
+
+using ApproxFun
+
+t = range(0, pi, 100)
+xy = reverse.(sincos.(t)) 
+spl = ParametricSpline(t, stack(xy); k = 2, s = 0)
+der = derivative.(Ref(spl), pts)
+θ = [atan(reverse(d)...) for d in der]
+unwrap!(θ)
+spl = Spline1D(t, θ)
+function fun(p)
+    spl(p)
+end
+S = Chebyshev(0..π);
+p = points(S,20);  # the default grid
+v = fun.(p);  # values at the default grid
+f = Fun(S,ApproxFun.transform(S,v));
+
+
+t = range(0, pi, 100)
+ff = cumsum(f')
+lines(t, ff.(t))
+
+
+S = 0..π
+n = 100
+pts = ApproxFun.points(S, n)
+t = range(0, pi, 50)
+xy = reverse.(sincos.(t)) 
+spl = ParametricSpline(t, stack(xy); k = 2, s = 0)
+der = derivative.(Ref(spl), pts)
+θ = [atan(reverse(d)...) for d in der]
+unwrap!(θ)
+lines(rad2deg.(θ))
+
+S = Chebyshev()
+
+nfun = Fun(S, ApproxFun.transform(S, θ))
+
+t = range(0, π, 100)
+lines(nfun)
+
+
 
 using Statistics
 mean_angle(θ) = angle(mean(exp, θ*im))
@@ -202,20 +252,24 @@ CairoMakie.activate!()
     plot_direction(row.poi_index, row.spl, row.t, row.run_id)
 end
 
-    GLMakie.activate!()
+GLMakie.activate!()
 function turning_event(t, spl, poi_index)
     der = derivative.(Ref(spl), t)
     θ = [atan(reverse(d)...) for d in der]
+    unwrap!(θ)
     # d, i = findmax(diff(θ[poi_index:end]))
     d, i = findmax(abs.(diff(θ)))
     # (; d, dt = t[i + poi_index - 1] - t[poi_index])
     (; d = rad2deg(d), dt = t[i] - t[poi_index])
 end
 df = select(runs, [:tij_file, :rectify, :poi] => ByRow(get_spline) => [:t, :spl, :poi_index], Cols(:run_id, :dance, :light, :at_run));
-transform!(df, [:t, :spl] => ByRow(turning_event) => [:d, :dt]);
-plt = data(df) * mapping(:dt => "Time from POI (sec)", :d => "Turn (°)", col = :dance => nonnumeric, row = :light => nonnumeric => "at run", color = :at_run) * visual(Scatter)
+transform!(df, [:t, :spl, :poi_index] => ByRow(turning_event) => [:d, :dt]);
+
+plt = data(df) * mapping(:dt => "Time from POI (sec)", :d => "Turn (°)", col = :dance => nonnumeric, row = :light => nonnumeric) * AlgebraOfGraphics.density(npoints=30) * visual(Contour)
 fig = draw(plt)
 
+plt = data(df) * mapping(:dance, :d => "Turn (°)", color = :light, dodge = :light, row = :at_run) * visual(Violin, datalimits = (0, 180))
+fig = draw(plt)
 
 
 
