@@ -43,6 +43,8 @@ select!(runs, Not(:runs_path, :start_location, :calibration_id, :fps, :target_wi
 words = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth", "eleventh", "twelfth"]
 transform!(runs, :dance => ByRow(x -> x ? "dance" : "no dance"), :at_run => ByRow(x -> words[x]), renamecols = false)
 
+
+
 function get_rotation(xy)
     # θ = -atan(reverse(sum(normalize, xy))...)
     # θ = -atan(reverse(sum(normalize, xy))...)
@@ -58,14 +60,21 @@ function get_rotation(xy)
     # θ = π/2 - θ
     LinearMap(Angle2d(θ))
 end
+function smooth!(xy, t, poi_index)
+    k, s = (2, 100)
+    n = length(xy)
+    for i in (1:poi_index, poi_index+1:n)
+        tp = ParametricSpline(t[i], stack(xy[i]); k, s)
+        xy[i] .= SVector{2, Float64}.(tp.(t[i]))
+    end
+end
 function get_txy(tij_file, rectify, poi)
     tij = CSV.File(joinpath(results_dir, tij_file))
     t = range(tij.t[1], tij.t[end], length = length(tij))
     poi_index = something(findfirst(>(poi), t), length(t))
     ij = SVector{2, Int}.(tij.i, tij.j)
     xy = rectify.(ij)
-    tp = ParametricSpline(t, stack(xy); k = 2, s = 300)
-    xy .= SVector{2, Float64}.(tp.(t))
+    smooth!(xy, t, poi_index)
     trans = Translation(-xy[1])
     xy .= trans.(xy)
     rot = get_rotation(xy[2:poi_index])
@@ -98,6 +107,20 @@ end
 
 
 
+
+# if isdir("tracks")
+#     rm("tracks", recursive=true)
+# end
+# mkpath("tracks")
+# for row in eachrow(runs)
+#     CSV.write(joinpath("tracks", string(row.run_id, ".csv")), (;x = first.(row.xy), y = last.(row.xy), t = row.t))
+# end
+
+
+
+
+
+sjkdhfgksdjhksdfhj
 
 
 
@@ -151,7 +174,7 @@ function get_spline(tij_file, rectify, poi)
     poi_index = something(findfirst(>(poi), t), length(t))
     ij = SVector{2, Int}.(tij.i, tij.j)
     xy = rectify.(ij)
-    (;t, spl = ParametricSpline(t, stack(xy); k = 2, s = 300), poi_index)
+    (;t, spl = ParametricSpline(t, stack(xy); k = 1, s = 0), poi_index)
 end
 
 df = select(runs, [:tij_file, :rectify, :poi] => ByRow(get_spline) => [:t, :spl, :poi_index], Cols(:run_id, :dance, :light, :at_run))
@@ -162,26 +185,74 @@ df = select(runs, [:tij_file, :rectify, :poi] => ByRow(get_spline) => [:t, :spl,
 
 using ApproxFun
 
-t = range(0, pi, 100)
-xy = reverse.(sincos.(t)) 
-spl = ParametricSpline(t, stack(xy); k = 2, s = 0)
-der = derivative.(Ref(spl), pts)
+function unwrap!(x, period = 2π)
+    y = convert(eltype(x), period)
+    v = first(x)
+    for k = eachindex(x)
+        x[k] = v = v + rem(x[k] - v,  y, RoundNearest)
+    end
+end
+
+function get_turn_profile(t, spl, poi_index, h = 2)
+
+    t2 = t[poi_index:end]
+    der = derivative.(Ref(spl), t2)
+    θ = [atan(reverse(d)...) for d in der]
+    unwrap!(θ)
+    spl1 = Spline1D(t2, θ)
+    S = Chebyshev(ApproxFun.ClosedInterval(extrema(t2)...));
+    p = points(S, length(t2));
+    v = spl1.(p);  
+    f = Fun(S,ApproxFun.transform(S,v));
+
+    DefiniteIntegral(t2[1]..(t2[1] + h)) * (f')
+
+    F = cumsum(f')
+    θ1 = F(t2[1] + h) - F(t2[1])
+    θtotal = F(t2[end])
+
+    (; θ1, θtotal)
+
+end
+
+h = 1
+transform!(df, [:t, :spl, :poi_index] => ByRow((args...) -> get_turn_profile(args..., h)) => [:θ1, :θtotal])
+abtrace = data((; intercept = [0], slope = [1]))  * mapping(:intercept, :slope) * visual(ABLines)
+plt = data(df) * mapping(:θ1 => rad2deg => "Turn within $h seconds (°)", :θtotal => rad2deg => "Total turn (°)", col = :dance => nonnumeric, row = :light => nonnumeric, color = :at_run) * visual(Scatter) + abtrace
+fig = draw(plt)
+
+
+
+row = collect(eachrow(df))[5]
+spl = row.spl
+t = row.t
+poi_index = row.poi_index
+lines(Point2f.(spl.(t)), axis = (;aspect = DataAspect()))
+scatter!(Point2f.(spl.(t[poi_index])))
+
+t2 = t[poi_index:end]
+der = derivative.(Ref(spl), t2)
 θ = [atan(reverse(d)...) for d in der]
 unwrap!(θ)
-spl = Spline1D(t, θ)
-function fun(p)
-    spl(p)
-end
-S = Chebyshev(0..π);
-p = points(S,20);  # the default grid
-v = fun.(p);  # values at the default grid
+spl1 = Spline1D(t2, θ)
+S = Chebyshev(ApproxFun.ClosedInterval(extrema(t2)...));
+p = points(S, length(t2));
+v = spl1.(p);  
 f = Fun(S,ApproxFun.transform(S,v));
+lines(t2, θ)
+lines!(t2, f.(t2))
 
 
-t = range(0, pi, 100)
 ff = cumsum(f')
-lines(t, ff.(t))
+lines(t2, ff.(t2))
 
+ff(t2[1] + 2) - ff(t2[1])
+ff(t2[end])
+
+f = Fun...
+F = cumsum(f)
+a, b = (1, 2)
+s = F(b) - F(a)
 
 S = 0..π
 n = 100
@@ -206,13 +277,6 @@ lines(nfun)
 using Statistics
 mean_angle(θ) = angle(mean(exp, θ*im))
 
-function unwrap!(x, period = 2π)
-	y = convert(eltype(x), period)
-	v = first(x)
-	@inbounds for k = eachindex(x)
-		x[k] = v = v + rem(x[k] - v,  y, RoundNearest)
-	end
-end
 
 function plot_direction(poi_index, spl, t, run_id)
     # row = df[2,:]
