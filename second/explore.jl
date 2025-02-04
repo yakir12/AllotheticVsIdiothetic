@@ -61,12 +61,14 @@ function get_rotation(xy)
     LinearMap(Angle2d(θ))
 end
 function smooth!(xy, t, poi_index)
-    k, s = (2, 100)
-    n = length(xy)
-    for i in (1:poi_index, poi_index+1:n)
-        tp = ParametricSpline(t[i], stack(xy[i]); k, s)
-        xy[i] .= SVector{2, Float64}.(tp.(t[i]))
-    end
+    # k, s = (2, 100)
+    tp = ParametricSpline(t, stack(xy))
+    xy .= SVector{2, Float64}.(tp.(t))
+    # n = length(xy)
+    # for i in (1:poi_index, poi_index+1:n)
+    #     tp = ParametricSpline(t[i], stack(xy[i]); k, s)
+    #     xy[i] .= SVector{2, Float64}.(tp.(t[i]))
+    # end
 end
 function get_txy(tij_file, rectify, poi)
     tij = CSV.File(joinpath(results_dir, tij_file))
@@ -108,13 +110,13 @@ end
 
 
 
-# if isdir("tracks")
-#     rm("tracks", recursive=true)
-# end
-# mkpath("tracks")
-# for row in eachrow(runs)
-#     CSV.write(joinpath("tracks", string(row.run_id, ".csv")), (;x = first.(row.xy), y = last.(row.xy), t = row.t))
-# end
+if isdir("trajectories")
+    rm("trajectories", recursive=true)
+end
+mkpath("trajectories")
+for row in eachrow(runs)
+    CSV.write(joinpath("trajectories", string(row.run_id, ".csv")), (;x = first.(row.xy), y = last.(row.xy), t = row.t))
+end
 
 
 
@@ -174,7 +176,7 @@ function get_spline(tij_file, rectify, poi)
     poi_index = something(findfirst(>(poi), t), length(t))
     ij = SVector{2, Int}.(tij.i, tij.j)
     xy = rectify.(ij)
-    (;t, spl = ParametricSpline(t, stack(xy); k = 1, s = 0), poi_index)
+    (;t, spl = ParametricSpline(t, stack(xy)), poi_index)
 end
 
 df = select(runs, [:tij_file, :rectify, :poi] => ByRow(get_spline) => [:t, :spl, :poi_index], Cols(:run_id, :dance, :light, :at_run))
@@ -184,6 +186,7 @@ df = select(runs, [:tij_file, :rectify, :poi] => ByRow(get_spline) => [:t, :spl,
 # 2. how much of it hapened in the first x seconds from the light introduction
 
 using ApproxFun
+GLMakie.activate!()
 
 function unwrap!(x, period = 2π)
     y = convert(eltype(x), period)
@@ -194,28 +197,24 @@ function unwrap!(x, period = 2π)
 end
 
 function get_turn_profile(t, spl, poi_index, h = 2)
-
-    t2 = t[poi_index:end]
+    # h = 1
+    # row = df[1,:]
+    # t = row.t
+    # spl = row.spl
+    # poi_index = row.poi_index
+    t2 = t[poi_index - 2:end]
     der = derivative.(Ref(spl), t2)
     θ = [atan(reverse(d)...) for d in der]
     unwrap!(θ)
+    θ .-= θ[1]
+    # lines(t2, θ, axis = (; limits=((t2[1], t2[1] + h), nothing)))
     spl1 = Spline1D(t2, θ)
-    S = Chebyshev(ApproxFun.ClosedInterval(extrema(t2)...));
-    p = points(S, length(t2));
-    v = spl1.(p);  
-    f = Fun(S,ApproxFun.transform(S,v));
-
-    DefiniteIntegral(t2[1]..(t2[1] + h)) * (f')
-
-    F = cumsum(f')
-    θ1 = F(t2[1] + h) - F(t2[1])
-    θtotal = F(t2[end])
-
+    θ1 = spl1(t2[1] + h) - spl1(t2[1])
+    θtotal = spl1(t[end])
     (; θ1, θtotal)
-
 end
 
-h = 1
+h = 2
 transform!(df, [:t, :spl, :poi_index] => ByRow((args...) -> get_turn_profile(args..., h)) => [:θ1, :θtotal])
 abtrace = data((; intercept = [0], slope = [1]))  * mapping(:intercept, :slope) * visual(ABLines)
 plt = data(df) * mapping(:θ1 => rad2deg => "Turn within $h seconds (°)", :θtotal => rad2deg => "Total turn (°)", col = :dance => nonnumeric, row = :light => nonnumeric, color = :at_run) * visual(Scatter) + abtrace
