@@ -109,6 +109,41 @@ CairoMakie.activate!()
 end
 
 
+function get_txy(tij_file, rectify, poi)
+    tij = CSV.File(joinpath(results_dir, tij_file))
+    t = range(tij.t[1], tij.t[end], length = length(tij))
+    poi_index = something(findfirst(>(poi), t), length(t))
+    ij = SVector{2, Int}.(tij.i, tij.j)
+    xy = rectify.(ij)
+    xyraw = copy(xy)
+    smooth!(xy, t, poi_index)
+    (; poi_index, t, xy, xyraw)
+end
+transform!(runs, [:tij_file, :rectify, :poi] => ByRow(get_txy) => [:poi_index, :t, :xy, :xyraw])
+function plotone(run_id, xy, poi_index, xyraw)
+    fig  = Figure()
+    ax = Axis(fig[1,1], aspect = DataAspect(), autolimitaspect = 1, title = string(run_id), limits = ((-60, 60), (-60, 60)))
+    for r  in (30, 50)
+        lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
+    end
+    scatter!(ax, xyraw, markersize=2, color=:gray)
+    lines!(ax, xy[1:poi_index])
+    lines!(ax, xy[poi_index:end])
+    # θ = atan(reverse(sum(normalize, xy[2:poi_index]))...)
+    # arrows!(ax, [0], [0], [cos(θ)], [sin(θ)], lengthscale = 10)
+    # a, b = [first.(xy[1:poi_index]) ones(poi_index)] \ last.(xy[1:poi_index])
+    # ablines!(ax, b, a, color = :gray)
+    save(joinpath("raw", string(run_id, ".png")), fig)
+end
+if isdir("raw")
+    rm("raw", recursive=true)
+end
+mkpath("raw")
+CairoMakie.activate!()
+@tasks for row in eachrow(runs)
+    plotone(row.run_id, row.xy, row.poi_index, row.xyraw)
+end
+
 
 
 # if isdir("trajectories")
