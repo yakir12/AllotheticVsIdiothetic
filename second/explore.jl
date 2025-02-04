@@ -47,6 +47,16 @@ transform!(runs, :dance => ByRow(x -> x ? "dance" : "no dance"), :at_run => ByRo
 
 
 
+function gluePOI!(xy, poi_index)
+    p1 = xy[poi_index] 
+    p2 = xy[poi_index + 1]
+    if p1 ≠ p2
+        Δ = p1 - p2
+        xy[poi_index + 1:end] .-= Ref(Δ)
+        return norm(Δ)
+    end
+    return missing
+end
 function get_rotation(xy)
     # θ = -atan(reverse(sum(normalize, xy))...)
     # θ = -atan(reverse(sum(normalize, xy))...)
@@ -77,14 +87,15 @@ function get_txy(tij_file, rectify, poi)
     poi_index = something(findfirst(>(poi), t), length(t))
     ij = SVector{2, Int}.(tij.i, tij.j)
     xy = rectify.(ij)
+    Δ = gluePOI!(xy, poi_index)
     smooth!(xy, t, poi_index)
     trans = Translation(-xy[1])
     xy .= trans.(xy)
     rot = get_rotation(xy[2:poi_index])
     xy .= rot.(xy)
-    (; poi_index, t, xy)
+    (; poi_index, t, xy, Δ)
 end
-transform!(runs, [:tij_file, :rectify, :poi] => ByRow(get_txy) => [:poi_index, :t, :xy])
+transform!(runs, [:tij_file, :rectify, :poi] => ByRow(get_txy) => [:poi_index, :t, :xy, :Δ])
 function plotone(run_id, xy, poi_index)
     fig  = Figure()
     ax = Axis(fig[1,1], aspect = DataAspect(), autolimitaspect = 1, title = string(run_id), limits = ((-60, 60), (-60, 60)))
@@ -110,7 +121,6 @@ end
 
 
 
-
 # if isdir("trajectories")
 #     rm("trajectories", recursive=true)
 # end
@@ -120,6 +130,8 @@ end
 # end
 
 
+GLMakie.activate!()
+hist(collect(skipmissing(runs.Δ)))
 
 
 
@@ -176,10 +188,11 @@ function get_spline(tij_file, rectify, poi)
     poi_index = something(findfirst(>(poi), t), length(t))
     ij = SVector{2, Int}.(tij.i, tij.j)
     xy = rectify.(ij)
-    (;t, spl = ParametricSpline(t, stack(xy); k, s), poi_index)
+    Δ = gluePOI!(xy, poi_index)
+    (;t, spl = ParametricSpline(t, stack(xy); k, s), poi_index, Δ)
 end
 
-df = select(runs, [:tij_file, :rectify, :poi] => ByRow(get_spline) => [:t, :spl, :poi_index], Cols(:run_id, :dance, :light, :at_run))
+df = select(runs, [:tij_file, :rectify, :poi] => ByRow(get_spline) => [:t, :spl, :poi_index, :Δ], Cols(:run_id, :dance, :light, :at_run))
 
 # questions:
 # 1. how much did they turn overall
@@ -199,7 +212,7 @@ end
 using QuadGK, Optim
 
 function get_turn_profile(t, spl, poi_index, l = 5)
-    o = optimize(t1 -> abs2(first(quadgk(t -> norm(derivative(spl, t)), t1, t[poi_index])) - l), t[1], t[poi_index])
+    o = optimize(t1 -> abs2(first(quadgk(t -> norm(derivative(spl, t)), t1, t[poi_index])) - 3), t[1], t[poi_index])
     t1 = o.minimizer
     o = optimize(t2 -> abs2(first(quadgk(t -> norm(derivative(spl, t)), t[poi_index], t2)) - l), t[poi_index], t[end])
     t2 = o.minimizer
@@ -220,17 +233,39 @@ function get_turn_profile(t, spl, poi_index, l = 5)
     (; θ1, θtotal)
 end
 
-h = 6
-transform!(df, [:t, :spl, :poi_index] => ByRow((args...) -> get_turn_profile(args..., h)) => [:θ1, :θtotal])
+
 
 abtrace = data((; intercept = [0], slope = [1]))  * mapping(:intercept, :slope) * visual(ABLines, color = :gray)
 df1 = subset(df, :light => ByRow(==("shift")))
 # df1 = vcat(df1, transform(df1, :at_run => ByRow(_ -> "pooled"); renamecols = false))
+df1 = map(1:2:11) do h
+    df2 = transform(df1, [:t, :spl, :poi_index] => ByRow((args...) -> get_turn_profile(args..., h)) => [:θ1, :θtotal])
+    df2.h .= h
+    df2
+end |> splat(vcat)
 
-plt = abtrace + data(df1) * mapping(:θ1 => rad2deg => "Turn within first ±$h cm path from POI (°)", :θtotal => rad2deg => "Total turn (°)", col = :dance => nonnumeric, row = :at_run) * visual(Scatter, color = :white, markersize = 3, strokecolor = :black, strokewidth = 2)
-fig = draw(plt; axis = (; xticks = [-180, 0, 180]))
+
+plt = abtrace + data(df1) * mapping(:θ1 => rad2deg => "Turn between 3 cm before and h cm after the POI (°)", :θtotal => rad2deg => "Total turn (°)", col = :dance => nonnumeric, row = :h => nonnumeric) * visual(Scatter, color = :white, markersize = 3, strokecolor = :black, strokewidth = 2)
+fig = draw(plt; axis = (; yticks = [-180, 0, 180], xticks = [-180, 0, 180]))
 
 save("figure1.png", fig)
+
+
+
+
+
+
+# function method1a()
+#     knots = Dierckx.get_knots(spl)
+#     s = 0.0
+#     for (k1, k2) in zip(knots[1:end-1], knots[2:end])
+#         res, _ = quadgk(t -> norm(derivative(spl, t)), k1, k2)
+#         s += res
+#     end
+#     return s - π
+# end
+# @btime method1a()
+
 
 
 
