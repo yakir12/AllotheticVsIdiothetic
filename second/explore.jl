@@ -6,6 +6,8 @@ using CSV, DataFrames, DataFramesMeta, CameraCalibrations
 using Interpolations, StaticArrays, Dierckx, CoordinateTransformations, Rotations
 using OhMyThreads
 
+k, s = (2, 300)
+
 tosecond(t::T) where {T <: TimePeriod} = t / convert(T, Dates.Second(1))
 tosecond(t::TimeType) = tosecond(t - Time(0))
 tosecond(sec::Real) = sec
@@ -61,8 +63,7 @@ function get_rotation(xy)
     LinearMap(Angle2d(θ))
 end
 function smooth!(xy, t, poi_index)
-    # k, s = (2, 100)
-    tp = ParametricSpline(t, stack(xy))
+    tp = ParametricSpline(t, stack(xy); k, s)
     xy .= SVector{2, Float64}.(tp.(t))
     # n = length(xy)
     # for i in (1:poi_index, poi_index+1:n)
@@ -110,65 +111,64 @@ end
 
 
 
-if isdir("trajectories")
-    rm("trajectories", recursive=true)
-end
-mkpath("trajectories")
-for row in eachrow(runs)
-    CSV.write(joinpath("trajectories", string(row.run_id, ".csv")), (;x = first.(row.xy), y = last.(row.xy), t = row.t))
-end
+# if isdir("trajectories")
+#     rm("trajectories", recursive=true)
+# end
+# mkpath("trajectories")
+# for row in eachrow(runs)
+#     CSV.write(joinpath("trajectories", string(row.run_id, ".csv")), (;x = first.(row.xy), y = last.(row.xy), t = row.t))
+# end
 
 
 
 
 
-sjkdhfgksdjhksdfhj
 
 
 
-GLMakie.activate!()
-
-words = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth", "eleventh", "twelfth"]
-
-transform!(runs, :dance => ByRow(x -> x ? "dance" : "no dance"), :at_run => ByRow(x -> words[x]), renamecols = false)
-
-function cropto(xy, l)
-    i = something(findfirst(>(l) ∘ norm, xy), length(xy))
-    xy[1:i-1]
-end
-
-transform!(runs, :xy => ByRow(xy -> cropto(xy, 50)); renamecols = false)
-
-df1 = flatten(runs, :xy)
-transform!(df1, :xy => [:x, :y])
-
-plt = data(df1) * mapping(:x => "X (cm)", :y => "Y (cm)", group=:run_id => nonnumeric, col = :dance => nonnumeric, row = :at_run => nonnumeric => "at run", color = :light) * visual(Lines)
-fig = draw(plt; axis=(aspect=1, ))
-for ax in fig.figure.content 
-    if ax isa Axis
-        for r  in (30, 50)
-            lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
-        end
-    end
-end
-
-save("figure1.png", fig)
-
-# display(fig)
-
-
-
-plt = data(df1) * mapping(:x => "X (cm)", :y => "Y (cm)", group=:run_id => nonnumeric, col = :dance => nonnumeric, row = :light => nonnumeric => "at run", color = :at_run) * visual(Lines)
-fig = draw(plt; axis=(aspect=1, ))
-for ax in fig.figure.content 
-    if ax isa Axis
-        for r  in (30, 50)
-            lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
-        end
-    end
-end
-
-save("figure2.png", fig)
+# GLMakie.activate!()
+#
+# words = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth", "eleventh", "twelfth"]
+#
+# transform!(runs, :dance => ByRow(x -> x ? "dance" : "no dance"), :at_run => ByRow(x -> words[x]), renamecols = false)
+#
+# function cropto(xy, l)
+#     i = something(findfirst(>(l) ∘ norm, xy), length(xy))
+#     xy[1:i-1]
+# end
+#
+# transform!(runs, :xy => ByRow(xy -> cropto(xy, 50)); renamecols = false)
+#
+# df1 = flatten(runs, :xy)
+# transform!(df1, :xy => [:x, :y])
+#
+# plt = data(df1) * mapping(:x => "X (cm)", :y => "Y (cm)", group=:run_id => nonnumeric, col = :dance => nonnumeric, row = :at_run => nonnumeric => "at run", color = :light) * visual(Lines)
+# fig = draw(plt; axis=(aspect=1, ))
+# for ax in fig.figure.content 
+#     if ax isa Axis
+#         for r  in (30, 50)
+#             lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
+#         end
+#     end
+# end
+#
+# save("figure1.png", fig)
+#
+# # display(fig)
+#
+#
+#
+# plt = data(df1) * mapping(:x => "X (cm)", :y => "Y (cm)", group=:run_id => nonnumeric, col = :dance => nonnumeric, row = :light => nonnumeric => "at run", color = :at_run) * visual(Lines)
+# fig = draw(plt; axis=(aspect=1, ))
+# for ax in fig.figure.content 
+#     if ax isa Axis
+#         for r  in (30, 50)
+#             lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
+#         end
+#     end
+# end
+#
+# save("figure2.png", fig)
 
 function get_spline(tij_file, rectify, poi)
     tij = CSV.File(joinpath(results_dir, tij_file))
@@ -176,7 +176,7 @@ function get_spline(tij_file, rectify, poi)
     poi_index = something(findfirst(>(poi), t), length(t))
     ij = SVector{2, Int}.(tij.i, tij.j)
     xy = rectify.(ij)
-    (;t, spl = ParametricSpline(t, stack(xy)), poi_index)
+    (;t, spl = ParametricSpline(t, stack(xy); k, s), poi_index)
 end
 
 df = select(runs, [:tij_file, :rectify, :poi] => ByRow(get_spline) => [:t, :spl, :poi_index], Cols(:run_id, :dance, :light, :at_run))
@@ -185,7 +185,6 @@ df = select(runs, [:tij_file, :rectify, :poi] => ByRow(get_spline) => [:t, :spl,
 # 1. how much did they turn overall
 # 2. how much of it hapened in the first x seconds from the light introduction
 
-using ApproxFun
 GLMakie.activate!()
 
 function unwrap!(x, period = 2π)
@@ -196,144 +195,157 @@ function unwrap!(x, period = 2π)
     end
 end
 
-function get_turn_profile(t, spl, poi_index, h = 2)
+
+using QuadGK, Optim
+
+function get_turn_profile(t, spl, poi_index, l = 5)
+    o = optimize(t1 -> abs2(first(quadgk(t -> norm(derivative(spl, t)), t1, t[poi_index])) - l), t[1], t[poi_index])
+    t1 = o.minimizer
+    o = optimize(t2 -> abs2(first(quadgk(t -> norm(derivative(spl, t)), t[poi_index], t2)) - l), t[poi_index], t[end])
+    t2 = o.minimizer
     # h = 1
     # row = df[1,:]
     # t = row.t
     # spl = row.spl
     # poi_index = row.poi_index
-    t2 = t[poi_index - 2:end]
-    der = derivative.(Ref(spl), t2)
+    ts = range(t1, t[end], step = 1/30)
+    der = derivative.(Ref(spl), ts)
     θ = [atan(reverse(d)...) for d in der]
     unwrap!(θ)
     θ .-= θ[1]
-    # lines(t2, θ, axis = (; limits=((t2[1], t2[1] + h), nothing)))
-    spl1 = Spline1D(t2, θ)
-    θ1 = spl1(t2[1] + h) - spl1(t2[1])
-    θtotal = spl1(t[end])
+    # lines(ts, θ, axis = (; limits=((t1, t[end]), nothing)))
+    spl1 = Spline1D(ts, θ)
+    θ1 = spl1(t2)
+    θtotal = spl1(ts[end])
     (; θ1, θtotal)
 end
 
-h = 2
+h = 6
 transform!(df, [:t, :spl, :poi_index] => ByRow((args...) -> get_turn_profile(args..., h)) => [:θ1, :θtotal])
-abtrace = data((; intercept = [0], slope = [1]))  * mapping(:intercept, :slope) * visual(ABLines)
-plt = data(df) * mapping(:θ1 => rad2deg => "Turn within $h seconds (°)", :θtotal => rad2deg => "Total turn (°)", col = :dance => nonnumeric, row = :light => nonnumeric, color = :at_run) * visual(Scatter) + abtrace
-fig = draw(plt)
+
+abtrace = data((; intercept = [0], slope = [1]))  * mapping(:intercept, :slope) * visual(ABLines, color = :gray)
+df1 = subset(df, :light => ByRow(==("shift")))
+# df1 = vcat(df1, transform(df1, :at_run => ByRow(_ -> "pooled"); renamecols = false))
+
+plt = abtrace + data(df1) * mapping(:θ1 => rad2deg => "Turn within first ±$h cm path from POI (°)", :θtotal => rad2deg => "Total turn (°)", col = :dance => nonnumeric, row = :at_run) * visual(Scatter, color = :white, markersize = 3, strokecolor = :black, strokewidth = 2)
+fig = draw(plt; axis = (; xticks = [-180, 0, 180]))
+
+save("figure1.png", fig)
 
 
 
-row = collect(eachrow(df))[5]
-spl = row.spl
-t = row.t
-poi_index = row.poi_index
-lines(Point2f.(spl.(t)), axis = (;aspect = DataAspect()))
-scatter!(Point2f.(spl.(t[poi_index])))
-
-t2 = t[poi_index:end]
-der = derivative.(Ref(spl), t2)
-θ = [atan(reverse(d)...) for d in der]
-unwrap!(θ)
-spl1 = Spline1D(t2, θ)
-S = Chebyshev(ApproxFun.ClosedInterval(extrema(t2)...));
-p = points(S, length(t2));
-v = spl1.(p);  
-f = Fun(S,ApproxFun.transform(S,v));
-lines(t2, θ)
-lines!(t2, f.(t2))
-
-
-ff = cumsum(f')
-lines(t2, ff.(t2))
-
-ff(t2[1] + 2) - ff(t2[1])
-ff(t2[end])
-
-f = Fun...
-F = cumsum(f)
-a, b = (1, 2)
-s = F(b) - F(a)
-
-S = 0..π
-n = 100
-pts = ApproxFun.points(S, n)
-t = range(0, pi, 50)
-xy = reverse.(sincos.(t)) 
-spl = ParametricSpline(t, stack(xy); k = 2, s = 0)
-der = derivative.(Ref(spl), pts)
-θ = [atan(reverse(d)...) for d in der]
-unwrap!(θ)
-lines(rad2deg.(θ))
-
-S = Chebyshev()
-
-nfun = Fun(S, ApproxFun.transform(S, θ))
-
-t = range(0, π, 100)
-lines(nfun)
-
-
-
-using Statistics
-mean_angle(θ) = angle(mean(exp, θ*im))
-
-
-function plot_direction(poi_index, spl, t, run_id)
-    # row = df[2,:]
-    # poi_index = row.poi_index
-    # spl = row.spl
-    # t = row.t
-    # run_id = row.run_id
-    # GLMakie.activate!()
-    der = derivative.(Ref(spl), t)
-    fig = Figure()
-    ax = Axis(fig[1,1], autolimitaspect = 1, aspect = DataAspect(), xlabel = "X (cm)", ylabel = "Y (cm)")
-    lines!(ax, Point2f.(spl.(t[1:poi_index])))
-    lines!(ax, Point2f.(spl.(t[poi_index:end])))
-    ax = Axis(fig[2,1], limits = (extrema(t), nothing), xlabel = "Time (sec)", ylabel = "Direction (°)")
-    θ = [atan(reverse(d)...) for d in der]
-    unwrap!(θ)
-    lines!(ax, t[1:poi_index], rad2deg.(θ[1:poi_index]))
-    lines!(ax, t[poi_index:end], rad2deg.(θ[poi_index:end]))
-    θs = [mean_angle(θ[i]) for i in (1:poi_index, poi_index:length(t))]
-    lines!(ax, t[[1, poi_index, poi_index, end]], [fill(rad2deg(θs[1]), 2); fill(rad2deg(θs[2]), 2)], color=:gray)
-    ax = Axis(fig[3,1], limits = (extrema(t), nothing), xlabel = "Time (sec)", ylabel = "Difference in direction (°)")
-    lines!(ax, t[2:end], diff(θ))
-    display(fig)
-    # save(joinpath("directions", string(run_id, ".png")), fig)
-end
-
-row = df[15,:]
-plot_direction(row.poi_index, row.spl, row.t, row.run_id)
-
-
-if isdir("directions")
-    rm("directions", recursive=true)
-end
-mkpath("directions")
-CairoMakie.activate!()
-@tasks for row in eachrow(df)
-    plot_direction(row.poi_index, row.spl, row.t, row.run_id)
-end
-
-GLMakie.activate!()
-function turning_event(t, spl, poi_index)
-    der = derivative.(Ref(spl), t)
-    θ = [atan(reverse(d)...) for d in der]
-    unwrap!(θ)
-    # d, i = findmax(diff(θ[poi_index:end]))
-    d, i = findmax(abs.(diff(θ)))
-    # (; d, dt = t[i + poi_index - 1] - t[poi_index])
-    (; d = rad2deg(d), dt = t[i] - t[poi_index])
-end
-df = select(runs, [:tij_file, :rectify, :poi] => ByRow(get_spline) => [:t, :spl, :poi_index], Cols(:run_id, :dance, :light, :at_run));
-transform!(df, [:t, :spl, :poi_index] => ByRow(turning_event) => [:d, :dt]);
-
-plt = data(df) * mapping(:dt => "Time from POI (sec)", :d => "Turn (°)", col = :dance => nonnumeric, row = :light => nonnumeric) * AlgebraOfGraphics.density(npoints=30) * visual(Contour)
-fig = draw(plt)
-
-plt = data(df) * mapping(:dance, :d => "Turn (°)", color = :light, dodge = :light, row = :at_run) * visual(Violin, datalimits = (0, 180))
-fig = draw(plt)
-
+# row = collect(eachrow(df))[5]
+# spl = row.spl
+# t = row.t
+# poi_index = row.poi_index
+# lines(Point2f.(spl.(t)), axis = (;aspect = DataAspect()))
+# scatter!(Point2f.(spl.(t[poi_index])))
+#
+# t2 = t[poi_index:end]
+# der = derivative.(Ref(spl), t2)
+# θ = [atan(reverse(d)...) for d in der]
+# unwrap!(θ)
+# spl1 = Spline1D(t2, θ)
+# S = Chebyshev(ApproxFun.ClosedInterval(extrema(t2)...));
+# p = points(S, length(t2));
+# v = spl1.(p);  
+# f = Fun(S,ApproxFun.transform(S,v));
+# lines(t2, θ)
+# lines!(t2, f.(t2))
+#
+#
+# ff = cumsum(f')
+# lines(t2, ff.(t2))
+#
+# ff(t2[1] + 2) - ff(t2[1])
+# ff(t2[end])
+#
+# f = Fun...
+# F = cumsum(f)
+# a, b = (1, 2)
+# s = F(b) - F(a)
+#
+# S = 0..π
+# n = 100
+# pts = ApproxFun.points(S, n)
+# t = range(0, pi, 50)
+# xy = reverse.(sincos.(t)) 
+# spl = ParametricSpline(t, stack(xy); k = 2, s = 0)
+# der = derivative.(Ref(spl), pts)
+# θ = [atan(reverse(d)...) for d in der]
+# unwrap!(θ)
+# lines(rad2deg.(θ))
+#
+# S = Chebyshev()
+#
+# nfun = Fun(S, ApproxFun.transform(S, θ))
+#
+# t = range(0, π, 100)
+# lines(nfun)
+#
+#
+#
+# using Statistics
+# mean_angle(θ) = angle(mean(exp, θ*im))
+#
+#
+# function plot_direction(poi_index, spl, t, run_id)
+#     # row = df[2,:]
+#     # poi_index = row.poi_index
+#     # spl = row.spl
+#     # t = row.t
+#     # run_id = row.run_id
+#     # GLMakie.activate!()
+#     der = derivative.(Ref(spl), t)
+#     fig = Figure()
+#     ax = Axis(fig[1,1], autolimitaspect = 1, aspect = DataAspect(), xlabel = "X (cm)", ylabel = "Y (cm)")
+#     lines!(ax, Point2f.(spl.(t[1:poi_index])))
+#     lines!(ax, Point2f.(spl.(t[poi_index:end])))
+#     ax = Axis(fig[2,1], limits = (extrema(t), nothing), xlabel = "Time (sec)", ylabel = "Direction (°)")
+#     θ = [atan(reverse(d)...) for d in der]
+#     unwrap!(θ)
+#     lines!(ax, t[1:poi_index], rad2deg.(θ[1:poi_index]))
+#     lines!(ax, t[poi_index:end], rad2deg.(θ[poi_index:end]))
+#     θs = [mean_angle(θ[i]) for i in (1:poi_index, poi_index:length(t))]
+#     lines!(ax, t[[1, poi_index, poi_index, end]], [fill(rad2deg(θs[1]), 2); fill(rad2deg(θs[2]), 2)], color=:gray)
+#     ax = Axis(fig[3,1], limits = (extrema(t), nothing), xlabel = "Time (sec)", ylabel = "Difference in direction (°)")
+#     lines!(ax, t[2:end], diff(θ))
+#     display(fig)
+#     # save(joinpath("directions", string(run_id, ".png")), fig)
+# end
+#
+# row = df[15,:]
+# plot_direction(row.poi_index, row.spl, row.t, row.run_id)
+#
+#
+# if isdir("directions")
+#     rm("directions", recursive=true)
+# end
+# mkpath("directions")
+# CairoMakie.activate!()
+# @tasks for row in eachrow(df)
+#     plot_direction(row.poi_index, row.spl, row.t, row.run_id)
+# end
+#
+# GLMakie.activate!()
+# function turning_event(t, spl, poi_index)
+#     der = derivative.(Ref(spl), t)
+#     θ = [atan(reverse(d)...) for d in der]
+#     unwrap!(θ)
+#     # d, i = findmax(diff(θ[poi_index:end]))
+#     d, i = findmax(abs.(diff(θ)))
+#     # (; d, dt = t[i + poi_index - 1] - t[poi_index])
+#     (; d = rad2deg(d), dt = t[i] - t[poi_index])
+# end
+# df = select(runs, [:tij_file, :rectify, :poi] => ByRow(get_spline) => [:t, :spl, :poi_index], Cols(:run_id, :dance, :light, :at_run));
+# transform!(df, [:t, :spl, :poi_index] => ByRow(turning_event) => [:d, :dt]);
+#
+# plt = data(df) * mapping(:dt => "Time from POI (sec)", :d => "Turn (°)", col = :dance => nonnumeric, row = :light => nonnumeric) * AlgebraOfGraphics.density(npoints=30) * visual(Contour)
+# fig = draw(plt)
+#
+# plt = data(df) * mapping(:dance, :d => "Turn (°)", color = :light, dodge = :light, row = :at_run) * visual(Violin, datalimits = (0, 180))
+# fig = draw(plt)
+#
 
 
 
