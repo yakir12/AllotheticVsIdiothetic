@@ -280,7 +280,7 @@ df1 = map(1:2:11) do h
 end |> splat(vcat)
 
 
-plt = abtrace + data(df1) * mapping(:θ1 => rad2deg => "Turn between 3 cm before and h cm after the POI (°)", :θtotal => rad2deg => "Total turn (°)", col = :dance => nonnumeric, row = :h => nonnumeric) * visual(Scatter, color = :white, markersize = 3, strokecolor = :black, strokewidth = 2)
+plt = abtrace + data(df1) * mapping(:θ1 => rad2deg => "Turn between 3 cm before and h cm after the POI (°)", :θtotal => rad2deg => "Total turn (°)", col = :dance => nonnumeric, row = :h => nonnumeric, color = :at_run) * visual(Scatter)
 fig = draw(plt; axis = (; yticks = [-180, 0, 180], xticks = [-180, 0, 180]))
 
 save("figure1.png", fig)
@@ -301,6 +301,62 @@ save("figure1.png", fig)
 # end
 # @btime method1a()
 
+function method1(spl, t1, t2)
+    tl = LinRange(t1, t2, 100_000)
+    xy = spl(tl)
+    Δxy = xy[:,2:end] - xy[:,1:end-1]
+    sum(norm.(eachcol(Δxy)))
+end
+function method2(spl, t1, t2)
+    res, _ = quadgk(t -> norm(derivative(spl, t)), t1, t2, rtol = 1e-8)
+    res
+end
+function method2a(spl)
+    knots = Dierckx.get_knots(spl)
+    s = 0.0
+    for (k1, k2) in zip(knots[1:end-1], knots[2:end])
+        res, _ = quadgk(t -> norm(derivative(spl, t)), k1, k2)
+        s += res
+    end
+    return s
+end
+function method3(spl, x_gauss, w_gauss)
+    knots = Dierckx.get_knots(spl)
+    integral = sum(eachindex(knots)[2:end]) do i
+        t1, t2 = knots[i-1], knots[i]
+        scale = (t2 - t1) / 2
+        sum(zip(x_gauss, w_gauss)) do ((xg, wg))
+            t = (xg + 1) * scale + t1 # map from (-1,1) to (t1,t2)
+            norm(derivative(spl, t)) * wg
+        end * scale
+    end
+end
+function method4(spl; kws...)
+    knots = Dierckx.get_knots(spl)
+    s, _ = quadgk(t -> norm(derivative(spl, t)), knots; kws...)
+    return s
+end
+
+
+
+row = collect(eachrow(df))[5]
+spl = row.spl
+t = row.t
+s, _ = quadgk(t -> norm(derivative(spl, t)), extrema(t)..., rtol = 1e-9)
+rel(x) = (x - s)/s
+
+rel(method1(spl, extrema(t)...))
+rel(method2(spl, extrema(t)...))
+rel(method2a(spl))
+rel(method3(spl, gauss(15)...))
+rel(method4(spl, order=4, rtol=1e-5))
+
+
+@btime method1($spl, extrema(t)...)
+@btime method2($spl, extrema(t)...)
+@btime method2a($spl)
+@btime method3($spl, $gauss(15)...)
+@btime method4($spl, order=4, rtol=1e-5)
 
 
 
