@@ -1,12 +1,12 @@
 using AlgebraOfGraphics, GLMakie
 using CairoMakie
 
-using Dates, LinearAlgebra
+using Dates, LinearAlgebra, Statistics
 using CSV, DataFrames, DataFramesMeta, CameraCalibrations
 using Interpolations, StaticArrays, Dierckx, CoordinateTransformations, Rotations
 using OhMyThreads
+using QuadGK, Optim
 
-k, s = (2, 300)
 
 tosecond(t::T) where {T <: TimePeriod} = t / convert(T, Dates.Second(1))
 tosecond(t::TimeType) = tosecond(t - Time(0))
@@ -27,213 +27,147 @@ end
 
 const results_dir = "../indoors/tracks and calibrations"
 
-# TODO: make sure you're not doing things double (like for the same row_number)
-# maybe appply the register earlier
-# this might look a lot better with dataframesmeta or something
-# maybe save in first the name of the csv files, complete, and the ones for the calibration too, just for ease of loading
-
 runs = CSV.read(joinpath(results_dir, "runs.csv"), DataFrame)
-# transform!(runs, :POI => ByRow(passmissing(tosecond)); renamecols = false)
+
 calibs = CSV.read(joinpath(results_dir, "calibs.csv"), DataFrame)
-# minimal work requred
 transform!(calibs, :calibration_id => ByRow(get_calibration) => :rectify)
 transform!(calibs, [:rectify, :center_ij] => ByRow((f, c) -> passmissing(f)(totuple(c))) => :center)
 transform!(calibs, [:rectify, :north_ij] => ByRow((f, c) -> passmissing(f)(totuple(c))) => :north)
 select!(calibs, Cols(:calibration_id, :rectify, :center, :north))
+
 leftjoin!(runs, calibs, on = :calibration_id)
+
 select!(runs, Not(:runs_path, :start_location, :calibration_id, :fps, :target_width, :runs_file, :window_size))
 words = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth", "eleventh", "twelfth"]
 transform!(runs, :dance => ByRow(x -> x ? "dance" : "no dance"), :at_run => ByRow(x -> words[x]), renamecols = false)
 
 
-
 function gluePOI!(xy, poi_index)
-    p1 = xy[poi_index] 
-    p2 = xy[poi_index + 1]
-    if p1 ≠ p2
-        Δ = p1 - p2
-        xy[poi_index + 1:end] .-= Ref(Δ)
-        return norm(Δ)
+    diffs = norm.(diff(xy[1:poi_index - 1]))
+    μ = mean(diffs)
+    σ = std(diffs)
+    Δ = only(diff(xy[poi_index - 1:poi_index]))
+    l = norm(Δ)
+    if l > μ + 1.5σ
+        xy[poi_index:end] .-= Ref(Δ)
+        return l
+    else
+        return missing
     end
-    return missing
 end
-function get_rotation(xy)
-    # θ = -atan(reverse(sum(normalize, xy))...)
-    # θ = -atan(reverse(sum(normalize, xy))...)
-    p1 = first(xy)
-    p2 = last(xy)
-    x, y = normalize(p2 - p1)
-    θ = π/2 - atan(y, x)
-    # p = first.(xy) \ last.(xy)
-    # θ = atan(p)
-    # if sum(last, xy) > 0
-    #     θ += π
-    # end
-    # θ = π/2 - θ
+function get_txy(tij_file, rectify, poi)
+    tij = CSV.File(joinpath(results_dir, tij_file))
+    t = range(tij.t[1], tij.t[end], length = length(tij))
+    poi_index = something(findfirst(≥(poi), t), length(t))
+    ij = SVector{2, Int}.(tij.i, tij.j)
+    xy = rectify.(ij)
+    Δ = gluePOI!(xy, poi_index)
+    (; t, xy, poi_index, dance_jump = Δ)
+end
+function get_spline(xy, t)
+    k, s = (2, 300)
+    tp = ParametricSpline(t, stack(xy); k, s)
+end
+function get_rotation(p2)
+    θ = π/2 - atan(reverse(p2)...)
     LinearMap(Angle2d(θ))
 end
-function smooth!(xy, t, poi_index)
-    tp = ParametricSpline(t, stack(xy); k, s)
-    xy .= SVector{2, Float64}.(tp.(t))
-    # n = length(xy)
-    # for i in (1:poi_index, poi_index+1:n)
-    #     tp = ParametricSpline(t[i], stack(xy[i]); k, s)
-    #     xy[i] .= SVector{2, Float64}.(tp.(t[i]))
-    # end
+function get_center_rotate(t, spl, poi_index)
+    f = SVector{2, Float64} ∘ spl
+    p1 = f(t[1])
+    p2 = f(t[poi_index])
+    trans = Translation(-p1)
+    p2 = trans(p2)
+    rot = get_rotation(p2)
+    return rot ∘ trans
 end
-function get_txy(tij_file, rectify, poi)
-    tij = CSV.File(joinpath(results_dir, tij_file))
-    t = range(tij.t[1], tij.t[end], length = length(tij))
-    poi_index = something(findfirst(>(poi), t), length(t))
-    ij = SVector{2, Int}.(tij.i, tij.j)
-    xy = rectify.(ij)
-    Δ = gluePOI!(xy, poi_index)
-    smooth!(xy, t, poi_index)
-    trans = Translation(-xy[1])
-    xy .= trans.(xy)
-    rot = get_rotation(xy[2:poi_index])
-    xy .= rot.(xy)
-    (; poi_index, t, xy, Δ)
-end
-transform!(runs, [:tij_file, :rectify, :poi] => ByRow(get_txy) => [:poi_index, :t, :xy, :Δ])
-function plotone(run_id, xy, poi_index)
+
+transform!(runs, [:tij_file, :rectify, :poi] => ByRow(get_txy) => [:t, :xy, :poi_index, :dance_jump])
+transform!(runs, [:xy, :t] => ByRow(get_spline) => :spl)
+transform!(runs, [:t, :spl, :poi_index] => ByRow(get_center_rotate) => :center_rotate)
+transform!(runs, [:t, :spl, :center_rotate] => ByRow((t, spl, tform) -> tform.(SVector{2, Float64}.(spl.(t)))) => :sxy)
+
+
+######################## plot tracks
+function plotone(run_id, xy, poi_index, center_rotate, sxy)
     fig  = Figure()
     ax = Axis(fig[1,1], aspect = DataAspect(), autolimitaspect = 1, title = string(run_id), limits = ((-60, 60), (-60, 60)))
     for r  in (30, 50)
         lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
     end
-    lines!(ax, xy[1:poi_index])
-    lines!(ax, xy[poi_index:end])
-    # θ = atan(reverse(sum(normalize, xy[2:poi_index]))...)
-    # arrows!(ax, [0], [0], [cos(θ)], [sin(θ)], lengthscale = 10)
-    # a, b = [first.(xy[1:poi_index]) ones(poi_index)] \ last.(xy[1:poi_index])
-    # ablines!(ax, b, a, color = :gray)
-    save(joinpath("tracks", string(run_id, ".png")), fig)
+    scatter!(ax, center_rotate.(xy[1:poi_index]), markersize = 2)
+    scatter!(ax, center_rotate.(xy[poi_index:end]), markersize = 2)
+    lines!(ax, sxy[1:poi_index])
+    lines!(ax, sxy[poi_index:end])
+    return fig
 end
-if isdir("tracks")
-    rm("tracks", recursive=true)
+path = "tracks"
+if isdir(path)
+    rm(path, recursive=true)
 end
-mkpath("tracks")
+mkpath(path)
 CairoMakie.activate!()
 @tasks for row in eachrow(runs)
-    plotone(row.run_id, row.xy, row.poi_index)
+    fig = plotone(row.run_id, row.xy, row.poi_index, row.center_rotate, row.sxy)
+    save(joinpath(path, string(row.run_id, ".png")), fig)
 end
+GLMakie.activate!()
 
+save("dance_jump.png", hist(collect(skipmissing(runs.dance_jump)), axis = (;xlabel = "Displacement at POI (cm)", ylabel = "#")))
 
-function get_txy(tij_file, rectify, poi)
-    tij = CSV.File(joinpath(results_dir, tij_file))
-    t = range(tij.t[1], tij.t[end], length = length(tij))
-    poi_index = something(findfirst(>(poi), t), length(t))
-    ij = SVector{2, Int}.(tij.i, tij.j)
-    xy = rectify.(ij)
-    xyraw = copy(xy)
-    smooth!(xy, t, poi_index)
-    (; poi_index, t, xy, xyraw)
+###########################################
+
+######################## plot figure 1 and 2
+function cropto(xy, l)
+    i = something(findfirst(>(l) ∘ norm, xy), length(xy))
+    xy[1:i-1]
 end
-transform!(runs, [:tij_file, :rectify, :poi] => ByRow(get_txy) => [:poi_index, :t, :xy, :xyraw])
-function plotone(run_id, xy, poi_index, xyraw)
-    fig  = Figure()
-    ax = Axis(fig[1,1], aspect = DataAspect(), autolimitaspect = 1, title = string(run_id), limits = ((-60, 60), (-60, 60)))
-    for r  in (30, 50)
-        lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
+transform!(runs, :sxy => ByRow(xy -> cropto(xy, 50)); renamecols = false)
+
+df1 = flatten(runs, :sxy)
+transform!(df1, :sxy => [:x, :y])
+
+plt = data(df1) * mapping(:x => "X (cm)", :y => "Y (cm)", group=:run_id => nonnumeric, col = :dance => nonnumeric, row = :at_run => nonnumeric => "at run", color = :light) * visual(Lines)
+fig = draw(plt; axis=(aspect=1, ))
+for ax in fig.figure.content 
+    if ax isa Axis
+        for r  in (30, 50)
+            lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
+        end
     end
-    scatter!(ax, xyraw, markersize=2, color=:gray)
-    lines!(ax, xy[1:poi_index])
-    lines!(ax, xy[poi_index:end])
-    # θ = atan(reverse(sum(normalize, xy[2:poi_index]))...)
-    # arrows!(ax, [0], [0], [cos(θ)], [sin(θ)], lengthscale = 10)
-    # a, b = [first.(xy[1:poi_index]) ones(poi_index)] \ last.(xy[1:poi_index])
-    # ablines!(ax, b, a, color = :gray)
-    save(joinpath("raw", string(run_id, ".png")), fig)
-end
-if isdir("raw")
-    rm("raw", recursive=true)
-end
-mkpath("raw")
-CairoMakie.activate!()
-@tasks for row in eachrow(runs)
-    plotone(row.run_id, row.xy, row.poi_index, row.xyraw)
 end
 
-
-# if isdir("trajectories")
-#     rm("trajectories", recursive=true)
-# end
-# mkpath("trajectories")
-# for row in eachrow(runs)
-#     CSV.write(joinpath("trajectories", string(row.run_id, ".csv")), (;x = first.(row.xy), y = last.(row.xy), t = row.t))
-# end
+save("figure1.png", fig)
 
 
-GLMakie.activate!()
-hist(collect(skipmissing(runs.Δ)))
+plt = data(df1) * mapping(:x => "X (cm)", :y => "Y (cm)", group=:run_id => nonnumeric, col = :dance => nonnumeric, row = :light => nonnumeric => "at run", color = :at_run) * visual(Lines)
+fig = draw(plt; axis=(aspect=1, ))
+for ax in fig.figure.content 
+    if ax isa Axis
+        for r  in (30, 50)
+            lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
+        end
+    end
+end
 
+save("figure2.png", fig)
 
+###########################################
 
-
-
-
-# GLMakie.activate!()
-#
-# words = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth", "eleventh", "twelfth"]
-#
-# transform!(runs, :dance => ByRow(x -> x ? "dance" : "no dance"), :at_run => ByRow(x -> words[x]), renamecols = false)
-#
-# function cropto(xy, l)
-#     i = something(findfirst(>(l) ∘ norm, xy), length(xy))
-#     xy[1:i-1]
-# end
-#
-# transform!(runs, :xy => ByRow(xy -> cropto(xy, 50)); renamecols = false)
-#
-# df1 = flatten(runs, :xy)
-# transform!(df1, :xy => [:x, :y])
-#
-# plt = data(df1) * mapping(:x => "X (cm)", :y => "Y (cm)", group=:run_id => nonnumeric, col = :dance => nonnumeric, row = :at_run => nonnumeric => "at run", color = :light) * visual(Lines)
-# fig = draw(plt; axis=(aspect=1, ))
-# for ax in fig.figure.content 
-#     if ax isa Axis
-#         for r  in (30, 50)
-#             lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
-#         end
+# function t2length(t, spl)
+#     n = length(t)
+#     l = Vector{Float64}(undef, n)
+#     l[1] = 0.0
+#     for i in 2:n
+#         l[i] = first(quadgk(t -> norm(derivative(spl, t)), t[1], t[i]))
 #     end
+#     return l
 # end
-#
-# save("figure1.png", fig)
-#
-# # display(fig)
-#
-#
-#
-# plt = data(df1) * mapping(:x => "X (cm)", :y => "Y (cm)", group=:run_id => nonnumeric, col = :dance => nonnumeric, row = :light => nonnumeric => "at run", color = :at_run) * visual(Lines)
-# fig = draw(plt; axis=(aspect=1, ))
-# for ax in fig.figure.content 
-#     if ax isa Axis
-#         for r  in (30, 50)
-#             lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
-#         end
-#     end
+# runs.l .= Ref(Float64[])
+# @tasks for row in eachrow(runs)
+#     row.l = t2length(row.t, row.spl)
 # end
-#
-# save("figure2.png", fig)
 
-function get_spline(tij_file, rectify, poi)
-    tij = CSV.File(joinpath(results_dir, tij_file))
-    t = range(tij.t[1], tij.t[end], length = length(tij))
-    poi_index = something(findfirst(>(poi), t), length(t))
-    ij = SVector{2, Int}.(tij.i, tij.j)
-    xy = rectify.(ij)
-    Δ = gluePOI!(xy, poi_index)
-    (;t, spl = ParametricSpline(t, stack(xy); k, s), poi_index, Δ)
-end
-
-df = select(runs, [:tij_file, :rectify, :poi] => ByRow(get_spline) => [:t, :spl, :poi_index, :Δ], Cols(:run_id, :dance, :light, :at_run))
-
-# questions:
-# 1. how much did they turn overall
-# 2. how much of it hapened in the first x seconds from the light introduction
-
-GLMakie.activate!()
 
 function unwrap!(x, period = 2π)
     y = convert(eltype(x), period)
@@ -244,18 +178,17 @@ function unwrap!(x, period = 2π)
 end
 
 
-using QuadGK, Optim
 
-function get_turn_profile(t, spl, poi_index, l = 5)
-    o = optimize(t1 -> abs2(first(quadgk(t -> norm(derivative(spl, t)), t1, t[poi_index])) - 3), t[1], t[poi_index])
-    t1 = o.minimizer
-    o = optimize(t2 -> abs2(first(quadgk(t -> norm(derivative(spl, t)), t[poi_index], t2)) - l), t[poi_index], t[end])
-    t2 = o.minimizer
-    # h = 1
+function get_turn_profile(t, spl, poi_index, l)
+    # l = -3
     # row = df[1,:]
     # t = row.t
     # spl = row.spl
     # poi_index = row.poi_index
+    o = optimize(t1 -> abs2(first(quadgk(t -> norm(derivative(spl, t)), t1, t[poi_index])) - 3), t[1], t[poi_index])
+    t1 = o.minimizer
+    o = optimize(t2 -> abs2(first(quadgk(t -> norm(derivative(spl, t)), t[poi_index], t2)) - l), t[poi_index], t[end])
+    t2 = o.minimizer
     ts = range(t1, t[end], step = 1/30)
     der = derivative.(Ref(spl), ts)
     θ = [atan(reverse(d)...) for d in der]
@@ -273,7 +206,7 @@ end
 abtrace = data((; intercept = [0], slope = [1]))  * mapping(:intercept, :slope) * visual(ABLines, color = :gray)
 df1 = subset(df, :light => ByRow(==("shift")))
 # df1 = vcat(df1, transform(df1, :at_run => ByRow(_ -> "pooled"); renamecols = false))
-df1 = map(1:2:11) do h
+df1 = map(0:3:12) do h
     df2 = transform(df1, [:t, :spl, :poi_index] => ByRow((args...) -> get_turn_profile(args..., h)) => [:θ1, :θtotal])
     df2.h .= h
     df2
@@ -287,77 +220,93 @@ save("figure1.png", fig)
 
 
 
+function get_turn_profile(t, spl, poi_index)
+    # l = -3
+    # row = df[1,:]
+    # t = row.t
+    # spl = row.spl
+    # poi_index = row.poi_index
+    o = optimize(t1 -> abs2(first(quadgk(t -> norm(derivative(spl, t)), t1, t[poi_index])) - 3), t[1], t[poi_index])
+    t1 = o.minimizer
+    ts = range(t1, t[end], step = 1/30)
+    der = derivative.(Ref(spl), ts)
+    θ = [atan(reverse(d)...) for d in der]
+    unwrap!(θ)
+    θ .-= θ[1]
+    # lines(ts, θ, axis = (; limits=((t1, t[end]), nothing)))
+    (; tθ = ts .- ts[1], θ = abs.(θ))
+end
+df1 = subset(df, :light => ByRow(==("shift")))
+transform!(df1, [:t, :spl, :poi_index] => ByRow(get_turn_profile) => [:tθ, :θ])
+
+df1 = flatten(df1, [:θ, :tθ])
+
+plt = data(df1) * mapping(:tθ => "Time from 3 cm before the POI (s)", :θ => rad2deg => "Turn (°)", group=:run_id => nonnumeric, col = :dance => nonnumeric, row = :at_run => nonnumeric) * visual(Lines)
+fig = draw(plt; figure = (;size = (700, 1000)), axis=(; limits = ((0, 30),(0, 300)) ))
+
+save("figure2.png", fig)
 
 
 
-# function method1a()
+
+
+# function method1(spl, t1, t2)
+#     tl = LinRange(t1, t2, 100_000)
+#     xy = spl(tl)
+#     Δxy = xy[:,2:end] - xy[:,1:end-1]
+#     sum(norm.(eachcol(Δxy)))
+# end
+# function method2(spl, t1, t2)
+#     res, _ = quadgk(t -> norm(derivative(spl, t)), t1, t2, rtol = 1e-8)
+#     res
+# end
+# function method2a(spl)
 #     knots = Dierckx.get_knots(spl)
 #     s = 0.0
 #     for (k1, k2) in zip(knots[1:end-1], knots[2:end])
 #         res, _ = quadgk(t -> norm(derivative(spl, t)), k1, k2)
 #         s += res
 #     end
-#     return s - π
+#     return s
 # end
-# @btime method1a()
-
-function method1(spl, t1, t2)
-    tl = LinRange(t1, t2, 100_000)
-    xy = spl(tl)
-    Δxy = xy[:,2:end] - xy[:,1:end-1]
-    sum(norm.(eachcol(Δxy)))
-end
-function method2(spl, t1, t2)
-    res, _ = quadgk(t -> norm(derivative(spl, t)), t1, t2, rtol = 1e-8)
-    res
-end
-function method2a(spl)
-    knots = Dierckx.get_knots(spl)
-    s = 0.0
-    for (k1, k2) in zip(knots[1:end-1], knots[2:end])
-        res, _ = quadgk(t -> norm(derivative(spl, t)), k1, k2)
-        s += res
-    end
-    return s
-end
-function method3(spl, x_gauss, w_gauss)
-    knots = Dierckx.get_knots(spl)
-    integral = sum(eachindex(knots)[2:end]) do i
-        t1, t2 = knots[i-1], knots[i]
-        scale = (t2 - t1) / 2
-        sum(zip(x_gauss, w_gauss)) do ((xg, wg))
-            t = (xg + 1) * scale + t1 # map from (-1,1) to (t1,t2)
-            norm(derivative(spl, t)) * wg
-        end * scale
-    end
-end
-function method4(spl; kws...)
-    knots = Dierckx.get_knots(spl)
-    s, _ = quadgk(t -> norm(derivative(spl, t)), knots; kws...)
-    return s
-end
-
-
-
-row = collect(eachrow(df))[5]
-spl = row.spl
-t = row.t
-s, _ = quadgk(t -> norm(derivative(spl, t)), extrema(t)..., rtol = 1e-9)
-rel(x) = (x - s)/s
-
-rel(method1(spl, extrema(t)...))
-rel(method2(spl, extrema(t)...))
-rel(method2a(spl))
-rel(method3(spl, gauss(15)...))
-rel(method4(spl, order=4, rtol=1e-5))
-
-
-@btime method1($spl, extrema(t)...)
-@btime method2($spl, extrema(t)...)
-@btime method2a($spl)
-@btime method3($spl, $gauss(15)...)
-@btime method4($spl, order=4, rtol=1e-5)
-
+# function method3(spl, x_gauss, w_gauss)
+#     knots = Dierckx.get_knots(spl)
+#     integral = sum(eachindex(knots)[2:end]) do i
+#         t1, t2 = knots[i-1], knots[i]
+#         scale = (t2 - t1) / 2
+#         sum(zip(x_gauss, w_gauss)) do ((xg, wg))
+#             t = (xg + 1) * scale + t1 # map from (-1,1) to (t1,t2)
+#             norm(derivative(spl, t)) * wg
+#         end * scale
+#     end
+# end
+# function method4(spl; kws...)
+#     knots = Dierckx.get_knots(spl)
+#     s, _ = quadgk(t -> norm(derivative(spl, t)), knots; kws...)
+#     return s
+# end
+#
+#
+#
+# row = collect(eachrow(df))[5]
+# spl = row.spl
+# t = row.t
+# s, _ = quadgk(t -> norm(derivative(spl, t)), extrema(t)..., rtol = 1e-9)
+# rel(x) = (x - s)/s
+#
+# rel(method1(spl, extrema(t)...))
+# rel(method2(spl, extrema(t)...))
+# rel(method2a(spl))
+# rel(method3(spl, gauss(15)...))
+# rel(method4(spl, order=4, rtol=1e-5))
+#
+#
+# @btime method1($spl, extrema(t)...)
+# @btime method2($spl, extrema(t)...)
+# @btime method2a($spl)
+# @btime method3($spl, $gauss(15)...)
+# @btime method4($spl, order=4, rtol=1e-5)
+#
 
 
 # row = collect(eachrow(df))[5]
