@@ -28,6 +28,7 @@ end
 const results_dir = "../indoors/tracks and calibrations"
 
 runs = CSV.read(joinpath(results_dir, "runs.csv"), DataFrame)
+subset!(runs, :light => ByRow(==("shift")))
 
 calibs = CSV.read(joinpath(results_dir, "calibs.csv"), DataFrame)
 transform!(calibs, :calibration_id => ByRow(get_calibration) => :rectify)
@@ -127,7 +128,7 @@ transform!(runs, :sxy => ByRow(xy -> cropto(xy, 50)); renamecols = false)
 df1 = flatten(runs, :sxy)
 transform!(df1, :sxy => [:x, :y])
 
-plt = data(df1) * mapping(:x => "X (cm)", :y => "Y (cm)", group=:run_id => nonnumeric, col = :dance => nonnumeric, row = :at_run => nonnumeric => "at run", color = :light) * visual(Lines)
+plt = data(df1) * mapping(:x => "X (cm)", :y => "Y (cm)", group=:run_id => nonnumeric, col = :dance => nonnumeric, row = :at_run => nonnumeric => "at run") * visual(Lines)
 fig = draw(plt; axis=(aspect=1, ))
 for ax in fig.figure.content 
     if ax isa Axis
@@ -140,7 +141,7 @@ end
 save("figure1.png", fig)
 
 
-plt = data(df1) * mapping(:x => "X (cm)", :y => "Y (cm)", group=:run_id => nonnumeric, col = :dance => nonnumeric, row = :light => nonnumeric => "at run", color = :at_run) * visual(Lines)
+plt = data(df1) * mapping(:x => "X (cm)", :y => "Y (cm)", group=:run_id => nonnumeric, col = :dance => nonnumeric, color = :at_run) * visual(Lines)
 fig = draw(plt; axis=(aspect=1, ))
 for ax in fig.figure.content 
     if ax isa Axis
@@ -168,7 +169,6 @@ save("figure2.png", fig)
 #     row.l = t2length(row.t, row.spl)
 # end
 
-
 function unwrap!(x, period = 2π)
     y = convert(eltype(x), period)
     v = first(x)
@@ -177,9 +177,31 @@ function unwrap!(x, period = 2π)
     end
 end
 
+function get_turn_profile(t, spl, poi_index, p)
+    i = round(Int, poi_index*p)
+    der = derivative.(Ref(spl), t[1:i])
+    θ = [atan(reverse(d)...) for d in der]
+    unwrap!(θ)
+    θ .-= θ[1]
+    return rad2deg(abs(θ[end]))
+end
+
+df = copy(runs)
+df.p .= Ref((0.1, 0.25, 0.5, 0.75, 0.9))
+df = flatten(df, :p)
+transform!(df, [:t, :spl, :poi_index, :p] => ByRow(get_turn_profile) => :turn)
 
 
-function get_turn_profile(t, spl, poi_index, l)
+plt = data(df) * mapping(:dance, :turn => "Turn (°)", row = :p => (x -> string(round(Int, 100x), " %")), col = :at_run => nonnumeric) * visual(Violin, datalimits=(0, Inf))
+fig = draw(plt; figure = (;size = (700, 1000)))
+
+save("figure3.png", fig)
+
+
+fskhfkjdshflkdshflfjdsa
+
+
+function get_turn_profile(t, spl, poi_index)
     # l = -3
     # row = df[1,:]
     # t = row.t
