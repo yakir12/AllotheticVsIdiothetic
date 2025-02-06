@@ -6,6 +6,8 @@ using CSV, DataFrames, DataFramesMeta, CameraCalibrations
 using Interpolations, StaticArrays, Dierckx, CoordinateTransformations, Rotations
 using OhMyThreads
 using QuadGK, Optim
+using LsqFit
+using CategoricalArrays
 
 
 tosecond(t::T) where {T <: TimePeriod} = t / convert(T, Dates.Second(1))
@@ -28,7 +30,6 @@ end
 const results_dir = "../indoors/tracks and calibrations"
 
 runs = CSV.read(joinpath(results_dir, "runs.csv"), DataFrame)
-subset!(runs, :light => ByRow(==("shift")))
 
 calibs = CSV.read(joinpath(results_dir, "calibs.csv"), DataFrame)
 transform!(calibs, :calibration_id => ByRow(get_calibration) => :rectify)
@@ -40,7 +41,7 @@ leftjoin!(runs, calibs, on = :calibration_id)
 
 select!(runs, Not(:runs_path, :start_location, :calibration_id, :fps, :target_width, :runs_file, :window_size))
 words = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth", "eleventh", "twelfth"]
-transform!(runs, :dance => ByRow(x -> x ? "dance" : "no dance"), :at_run => ByRow(x -> words[x]), renamecols = false)
+transform!(runs, :dance => ByRow(x -> x ? "dance" : "no dance"), :at_run => (i -> categorical(words[i]; levels = words)), renamecols = false)
 
 
 function gluePOI!(xy, poi_index)
@@ -88,6 +89,20 @@ transform!(runs, [:xy, :t] => ByRow(get_spline) => :spl)
 transform!(runs, [:t, :spl, :poi_index] => ByRow(get_center_rotate) => :center_rotate)
 transform!(runs, [:t, :spl, :center_rotate] => ByRow((t, spl, tform) -> tform.(SVector{2, Float64}.(spl.(t)))) => :sxy)
 
+################ save centered rotated raw
+
+path = "centered rotataed raw"
+if isdir(path)
+    rm(path, recursive=true)
+end
+mkpath(path)
+@tasks for row in eachrow(runs)
+    xy = row.center_rotate.(row.xy)
+    CSV.write(joinpath(path, string(row.run_id, ".csv")), (; x  = first.(xy), y = last.(xy)))
+end
+
+
+###################################################
 
 ######################## plot tracks
 function plotone(run_id, xy, poi_index, center_rotate, sxy)
@@ -117,6 +132,8 @@ GLMakie.activate!()
 save("dance_jump.png", hist(collect(skipmissing(runs.dance_jump)), axis = (;xlabel = "Displacement at POI (cm)", ylabel = "#")))
 
 ###########################################
+
+subset!(runs, :light => ByRow(==("shift")))
 
 ######################## plot figure 1 and 2
 function cropto(xy, l)
@@ -153,8 +170,29 @@ end
 
 save("figure2.png", fig)
 
+
+df1 = transform(runs, [:xy, :poi_index] => ByRow((x, i) -> x[1:i]) => :xy, [:sxy, :poi_index] => ByRow((x, i) -> x[1:i]) => :sxy)
+df1 = flatten(df1, [:sxy, :xy])
+transform!(df1, [:xy, :center_rotate] => ByRow((p, f) -> f(p)) => :xy)
+transform!(df1, :sxy => [:sx, :sy], :xy => [:x, :y])
+d = data(df1)
+m = mapping(group=:run_id => nonnumeric, col = :dance => nonnumeric, row = :at_run)
+
+plt = d * m * (mapping(:x, :y) * visual(Lines) + mapping(:sx, :sy) * visual(Lines, color = :red))
+fig = draw(plt; axis=(aspect=DataAspect(), xlabel = "X (cm)", ylabel = "Y (cm)"), figure = (;size = (1600, 4000)));
+save("start to POI.png", fig)
+
 ###########################################
 
+# function arclength(spl, t1, t2; kws...)
+#     knots = get_knots(spl)
+#     filter!(t -> t1 < t < t2, knots)
+#     pushfirst!(knots, t1)
+#     push!(knots, t2)
+#     s, _ = quadgk(t -> norm(derivative(spl, t)), knots; kws...)
+#     return s
+# end
+#
 # function t2length(t, spl)
 #     n = length(t)
 #     l = Vector{Float64}(undef, n)
@@ -175,6 +213,7 @@ function unwrap!(x, period = 2π)
     for k = eachindex(x)
         x[k] = v = v + rem(x[k] - v,  y, RoundNearest)
     end
+    return x
 end
 
 function get_turn_profile(t, spl, poi_index, p)
@@ -191,83 +230,191 @@ df.p .= Ref((0.1, 0.25, 0.5, 0.75, 0.9))
 df = flatten(df, :p)
 transform!(df, [:t, :spl, :poi_index, :p] => ByRow(get_turn_profile) => :turn)
 
-
 plt = data(df) * mapping(:dance, :turn => "Turn (°)", row = :p => (x -> string(round(Int, 100x), " %")), col = :at_run => nonnumeric) * visual(Violin, datalimits=(0, Inf))
 fig = draw(plt; figure = (;size = (700, 1000)))
 
 save("figure3.png", fig)
 
 
-fskhfkjdshflkdshflfjdsa
-
-
 function get_turn_profile(t, spl, poi_index)
-    # l = -3
-    # row = df[1,:]
-    # t = row.t
-    # spl = row.spl
-    # poi_index = row.poi_index
-    o = optimize(t1 -> abs2(first(quadgk(t -> norm(derivative(spl, t)), t1, t[poi_index])) - 3), t[1], t[poi_index])
-    t1 = o.minimizer
-    o = optimize(t2 -> abs2(first(quadgk(t -> norm(derivative(spl, t)), t[poi_index], t2)) - l), t[poi_index], t[end])
-    t2 = o.minimizer
-    ts = range(t1, t[end], step = 1/30)
-    der = derivative.(Ref(spl), ts)
-    θ = [atan(reverse(d)...) for d in der]
+    tθ = t[poi_index - 24:end]
+    θ = [atan(reverse(derivative(spl, ti))...) for ti in tθ]
+    θ₀ = θ[1]
+    θ .-= θ₀
     unwrap!(θ)
-    θ .-= θ[1]
-    # lines(ts, θ, axis = (; limits=((t1, t[end]), nothing)))
-    spl1 = Spline1D(ts, θ)
-    θ1 = spl1(t2)
-    θtotal = spl1(ts[end])
-    (; θ1, θtotal)
+    m, M = extrema(θ)
+    if abs(m) > M
+        θ .*= -1
+    end
+    return (; tθ = tθ .- tθ[1], θ = θ)
+end
+df1 = transform(runs, [:t, :spl, :poi_index] => ByRow(get_turn_profile) => [:tθ, :θ])
+df2 = flatten(df1, [:θ, :tθ])
+plt = data(df2) * mapping(:tθ => "Time from POI (sec)", :θ => rad2deg => "Turn (°)", group=:run_id => nonnumeric, col = :dance => nonnumeric, row = :at_run => nonnumeric) * visual(Lines)
+fig = draw(plt; figure = (;size = (700, 1000)), axis=(; yticks = [-180, 0, 180]))
+save("from 0.83 sec before POI.png", fig)
+
+
+logistic(x, L, k, x₀) = L / (1 + exp(-k*(x - x₀)))
+
+function fit_logistic(tθ, θ)
+    lb = [0.0]
+    ub = [2.0]
+    p0 = [0.1]
+    model(x, p) = logistic.(x, π, only(p), 0)
+    fit = curve_fit(model, tθ, θ, p0, lower = lb, upper = ub)
+    only(fit.param)
 end
 
+transform!(df1, [:tθ, :θ] => ByRow(fit_logistic) => :k)
+df1 = vcat(df1, transform(df1, :at_run => ByRow(_ -> "all"), renamecols = false))
+df1.at_run = categorical(df1.at_run)
+levels!(df1[:, :at_run], ["first", "fourth", "tenth", "all"])
+
+plt = data(df1) * mapping(:dance, :k, row = :at_run => nonnumeric) * visual(RainClouds, violin_limits = extrema)
+fig = draw(plt; figure = (;size = (400, 1000)))
+
+save("k.png", fig)
+
+##################################### DARK
 
 
-abtrace = data((; intercept = [0], slope = [1]))  * mapping(:intercept, :slope) * visual(ABLines, color = :gray)
-df1 = subset(df, :light => ByRow(==("shift")))
-# df1 = vcat(df1, transform(df1, :at_run => ByRow(_ -> "pooled"); renamecols = false))
-df1 = map(0:3:12) do h
-    df2 = transform(df1, [:t, :spl, :poi_index] => ByRow((args...) -> get_turn_profile(args..., h)) => [:θ1, :θtotal])
-    df2.h .= h
-    df2
-end |> splat(vcat)
+runs = CSV.read(joinpath(results_dir, "runs.csv"), DataFrame)
+subset!(runs, :light => ByRow(==("dark")))
+
+calibs = CSV.read(joinpath(results_dir, "calibs.csv"), DataFrame)
+transform!(calibs, :calibration_id => ByRow(get_calibration) => :rectify)
+transform!(calibs, [:rectify, :center_ij] => ByRow((f, c) -> passmissing(f)(totuple(c))) => :center)
+transform!(calibs, [:rectify, :north_ij] => ByRow((f, c) -> passmissing(f)(totuple(c))) => :north)
+select!(calibs, Cols(:calibration_id, :rectify, :center, :north))
+
+leftjoin!(runs, calibs, on = :calibration_id)
+
+select!(runs, Not(:runs_path, :start_location, :calibration_id, :fps, :target_width, :runs_file, :window_size))
+words = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth", "eleventh", "twelfth"]
+transform!(runs, :dance => ByRow(x -> x ? "dance" : "no dance"), :at_run => (i -> categorical(words[i]; levels = words)), renamecols = false)
 
 
-plt = abtrace + data(df1) * mapping(:θ1 => rad2deg => "Turn between 3 cm before and h cm after the POI (°)", :θtotal => rad2deg => "Total turn (°)", col = :dance => nonnumeric, row = :h => nonnumeric, color = :at_run) * visual(Scatter)
-fig = draw(plt; axis = (; yticks = [-180, 0, 180], xticks = [-180, 0, 180]))
+transform!(runs, [:tij_file, :rectify, :poi] => ByRow(get_txy) => [:t, :xy, :poi_index, :dance_jump])
+transform!(runs, [:xy, :t] => ByRow(get_spline) => :spl)
+transform!(runs, [:t, :spl, :poi_index] => ByRow(get_center_rotate) => :center_rotate)
+transform!(runs, [:t, :spl, :center_rotate] => ByRow((t, spl, tform) -> tform.(SVector{2, Float64}.(spl.(t)))) => :sxy)
 
-save("figure1.png", fig)
 
 
 
-function get_turn_profile(t, spl, poi_index)
-    # l = -3
-    # row = df[1,:]
-    # t = row.t
-    # spl = row.spl
-    # poi_index = row.poi_index
-    o = optimize(t1 -> abs2(first(quadgk(t -> norm(derivative(spl, t)), t1, t[poi_index])) - 3), t[1], t[poi_index])
-    t1 = o.minimizer
-    ts = range(t1, t[end], step = 1/30)
-    der = derivative.(Ref(spl), ts)
-    θ = [atan(reverse(d)...) for d in der]
-    unwrap!(θ)
-    θ .-= θ[1]
-    # lines(ts, θ, axis = (; limits=((t1, t[end]), nothing)))
-    (; tθ = ts .- ts[1], θ = abs.(θ))
-end
-df1 = subset(df, :light => ByRow(==("shift")))
-transform!(df1, [:t, :spl, :poi_index] => ByRow(get_turn_profile) => [:tθ, :θ])
+df1 = transform(runs, [:t, :spl, :poi_index] => ByRow(get_turn_profile) => [:tθ, :θ])
+df2 = flatten(df1, [:θ, :tθ])
+plt = data(df2) * mapping(:tθ => "Time from POI (sec)", :θ => rad2deg => "Turn (°)", group=:run_id => nonnumeric, col = :dance => nonnumeric, row = :at_run => nonnumeric) * visual(Lines)
+fig = draw(plt; figure = (;size = (700, 1000)), axis = (; limits = ((0, 20), (nothing, 400))))
 
-df1 = flatten(df1, [:θ, :tθ])
+save("from 0.83 sec before POI.png", fig)
 
-plt = data(df1) * mapping(:tθ => "Time from 3 cm before the POI (s)", :θ => rad2deg => "Turn (°)", group=:run_id => nonnumeric, col = :dance => nonnumeric, row = :at_run => nonnumeric) * visual(Lines)
-fig = draw(plt; figure = (;size = (700, 1000)), axis=(; limits = ((0, 30),(0, 300)) ))
 
-save("figure2.png", fig)
 
+
+
+
+
+# f(x, L, k, x₀) = L / (1 + exp(-k*(x - x₀)))
+#
+# n = 100
+# t = range(0, 10, n)
+# L = 180
+# k = 0.5
+# x₀ = 0
+# y = f.(t, L, k, x₀) .+ 0.02randn(n)
+# lines(t, y)
+#
+# lb = Float64[1, 0.5, -2]
+# ub = Float64[3, 2, 2]
+# p0 = Float64[3, 1, 1]
+# fit = curve_fit(model, t, y, p0, lower = lb, upper = ub)
+#
+# confidence_inter = confint(fit; level=0.95)
+#
+#
+# row = runs[1,:]
+# xy = row.xy
+# t = row.t
+# poi_index = row.poi_index
+#
+# fig = Figure()
+# ax = Axis(fig[1,1], aspect = DataAspect())
+# lines!(ax, xy)
+#
+# accumulate(t[poi_index - 24 : end]) do ti
+#
+#
+#     kasjdhgfkhgfksdhak
+#
+#     function get_turn_profile(t, spl, poi_index)
+#         # l = -3
+#         # row = df[1,:]
+#         # t = row.t
+#         # spl = row.spl
+#         # poi_index = row.poi_index
+#         o = optimize(t1 -> abs2(first(quadgk(t -> norm(derivative(spl, t)), t1, t[poi_index])) - 3), t[1], t[poi_index])
+#         t1 = o.minimizer
+#         o = optimize(t2 -> abs2(first(quadgk(t -> norm(derivative(spl, t)), t[poi_index], t2)) - l), t[poi_index], t[end])
+#         t2 = o.minimizer
+#         ts = range(t1, t[end], step = 1/30)
+#         der = derivative.(Ref(spl), ts)
+#         θ = [atan(reverse(d)...) for d in der]
+#         unwrap!(θ)
+#         θ .-= θ[1]
+#         # lines(ts, θ, axis = (; limits=((t1, t[end]), nothing)))
+#         spl1 = Spline1D(ts, θ)
+#         θ1 = spl1(t2)
+#         θtotal = spl1(ts[end])
+#         (; θ1, θtotal)
+#     end
+#
+#
+#
+#     abtrace = data((; intercept = [0], slope = [1]))  * mapping(:intercept, :slope) * visual(ABLines, color = :gray)
+#     df1 = subset(df, :light => ByRow(==("shift")))
+#     # df1 = vcat(df1, transform(df1, :at_run => ByRow(_ -> "pooled"); renamecols = false))
+#     df1 = map(0:3:12) do h
+#         df2 = transform(df1, [:t, :spl, :poi_index] => ByRow((args...) -> get_turn_profile(args..., h)) => [:θ1, :θtotal])
+#         df2.h .= h
+#         df2
+#     end |> splat(vcat)
+#
+#
+#     plt = abtrace + data(df1) * mapping(:θ1 => rad2deg => "Turn between 3 cm before and h cm after the POI (°)", :θtotal => rad2deg => "Total turn (°)", col = :dance => nonnumeric, row = :h => nonnumeric, color = :at_run) * visual(Scatter)
+#     fig = draw(plt; axis = (; yticks = [-180, 0, 180], xticks = [-180, 0, 180]))
+#
+#     save("figure1.png", fig)
+#
+#
+#
+#     function get_turn_profile(t, spl, poi_index)
+#         # l = -3
+#         # row = df[1,:]
+#         # t = row.t
+#         # spl = row.spl
+#         # poi_index = row.poi_index
+#         o = optimize(t1 -> abs2(first(quadgk(t -> norm(derivative(spl, t)), t1, t[poi_index])) - 3), t[1], t[poi_index])
+#         t1 = o.minimizer
+#         ts = range(t1, t[end], step = 1/30)
+#         der = derivative.(Ref(spl), ts)
+#         θ = [atan(reverse(d)...) for d in der]
+#         unwrap!(θ)
+#         θ .-= θ[1]
+#         # lines(ts, θ, axis = (; limits=((t1, t[end]), nothing)))
+#         (; tθ = ts .- ts[1], θ = abs.(θ))
+#     end
+#     df1 = subset(df, :light => ByRow(==("shift")))
+#     transform!(df1, [:t, :spl, :poi_index] => ByRow(get_turn_profile) => [:tθ, :θ])
+#
+#     df1 = flatten(df1, [:θ, :tθ])
+#
+#     plt = data(df1) * mapping(:tθ => "Time from 3 cm before the POI (s)", :θ => rad2deg => "Turn (°)", group=:run_id => nonnumeric, col = :dance => nonnumeric, row = :at_run => nonnumeric) * visual(Lines)
+#     fig = draw(plt; figure = (;size = (700, 1000)), axis=(; limits = ((0, 30),(0, 300)) ))
+#
+#     save("figure2.png", fig)
+#
 
 
 
