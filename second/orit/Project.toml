@@ -1,6 +1,11 @@
 [deps]
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
+CoordinateTransformations = "150eb455-5306-5404-9cee-2592286d6298"
+Dierckx = "39dd38d3-220a-591b-8e3c-4c3a8c710a94"
+FresnelIntegrals = "88497964-e39a-11e9-0fb5-b1bf0ffe80fe"
 GLMakie = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
 Optim = "429524aa-4258-5aef-a3af-852621145aeb"
 Polynomials = "f27b6e38-b328-58d1-80ce-0feddd5e7a45"
+Rotations = "6038ab10-8711-5258-84ad-4b1120ba62dc"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+Symbolics = "0c5d862f-8b57-4792-8d23-62f2024744c7"

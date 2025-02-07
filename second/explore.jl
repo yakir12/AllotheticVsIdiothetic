@@ -9,6 +9,7 @@ using QuadGK, Optim
 using LsqFit
 using CategoricalArrays
 
+include("smooth.jl")
 
 tosecond(t::T) where {T <: TimePeriod} = t / convert(T, Dates.Second(1))
 tosecond(t::TimeType) = tosecond(t - Time(0))
@@ -89,17 +90,52 @@ transform!(runs, [:xy, :t] => ByRow(get_spline) => :spl)
 transform!(runs, [:t, :spl, :poi_index] => ByRow(get_center_rotate) => :center_rotate)
 transform!(runs, [:t, :spl, :center_rotate] => ByRow((t, spl, tform) -> tform.(SVector{2, Float64}.(spl.(t)))) => :sxy)
 
-################ save centered rotated raw
+# ################ save centered rotated raw
+#
+# path = "calibrated"
+# if isdir(path)
+#     rm(path, recursive=true)
+# end
+# mkpath(path)
+# @tasks for row in eachrow(runs)
+#     CSV.write(joinpath(path, string(row.run_id, ".csv")), (; t = row.t, x  = first.(row.xy), y = last.(row.xy)))
+# end
+#
+# ############ experiment
 
-path = "centered rotataed raw"
+function center_rotate!(xy, poi_index)
+    xy .-= Ref(xy[1])
+    rot = get_rotation(xy[poi_index])
+    xy .= rot.(xy)
+end
+
+df = transform(runs, [:xy, :poi_index] => ByRow(center_rotate!) => :xy)
+transform!(df, [:t, :xy, :poi_index] => ByRow(get_smooth) => [:st, :sxy])
+
+function plotone(run_id, xy, poi_index, sxy)
+    fig  = Figure()
+    ax = Axis(fig[1,1], aspect = DataAspect(), autolimitaspect = 1, title = string(run_id), limits = ((-60, 60), (-60, 60)))
+    for r  in (30, 50)
+        lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
+    end
+    scatter!(ax, xy[1:poi_index], markersize = 2)
+    scatter!(ax, xy[poi_index:end], markersize = 2)
+    lines!(ax, sxy)
+    return fig
+end
+path = "tracks"
 if isdir(path)
     rm(path, recursive=true)
 end
 mkpath(path)
-@tasks for row in eachrow(runs)
-    xy = row.center_rotate.(row.xy)
-    CSV.write(joinpath(path, string(row.run_id, ".csv")), (; x  = first.(xy), y = last.(xy)))
+CairoMakie.activate!()
+@tasks for row in eachrow(df)
+    fig = plotone(row.run_id, row.xy, row.poi_index, row.sxy)
+    save(joinpath(path, string(row.run_id, ".png")), fig)
 end
+
+askljdhgflsdjhflsdjfhsld
+
 
 
 ###################################################

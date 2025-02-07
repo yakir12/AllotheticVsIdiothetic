@@ -25,7 +25,7 @@ end
 
 
 xy = [SVector{2, Float64}(row...) for row in CSV.File("../centered rotataed raw/160.csv")]
-# xy = xy[100:end]
+xy = xy[100:end]
 xy .-= Ref(xy[1])
 θ₀ = atan(reverse(xy[end])...)
 nsteps = length(xy)
