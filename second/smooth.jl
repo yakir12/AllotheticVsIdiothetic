@@ -24,6 +24,7 @@ end
 function get_guess(Δt, xy)
     Δ = diff(xy)
     θ = splat(atan).(reverse.(Δ))
+    unwrap!(θ)
     t = range(0; length = length(θ), step = Δt)
     polynom = Polynomials.fit(t, θ, 2)
     μ = mean(norm, Δ)
@@ -66,3 +67,156 @@ function get_smooth(t, xy, poi_index)
     return (; ts, track)
 end
 
+
+function fun(t, xy, poi_index)
+    n = length(t)
+    indices = collect(1:poi_index:n)
+    if n ∉ indices
+        push!(indices, n)
+    end
+    xy = xy[indices]
+    t = t[indices]
+    t .-= t[1]
+    Δt = mean(diff(t))
+    xy = xy[2:end]
+    p1 = xy[1]
+    t = range(0; length = length(xy), step = Δt)
+    Δ = diff(xy)
+    θ = splat(atan).(reverse.(Δ))
+    unwrap!(θ)
+    t = range(0; length = length(θ), step = Δt)
+    return t, θ
+end
+
+GLMakie.activate!()
+
+row = runs[6,:]
+t, xy, poi_index = (row.t, row.xy, row.poi_index)
+Δt = step(t)
+Δ = diff(xy)
+filter!(!iszero, Δ)
+θ = splat(atan).(reverse.(Δ))
+unwrap!(θ)
+
+l = norm.(Δ)
+L = cumsum(l)
+L .-= L[1]
+itp = interpolate((L, ), θ, Gridded(Linear()))
+μ = mean(l)
+lL = range(0, L[end], step = μ)
+lθ = itp.(lL)
+
+lines(L, θ)
+lines!(lL, lθ)
+
+fig = Figure()
+ax = Axis(fig[1,1], aspect = DataAspect())
+lines!(ax, xy)
+xy2 = cumsum(μ .* Point2f.(reverse.(sincos.(lθ))))
+scatter!(ax, xy2)
+
+signal = θ
+
+# N = length(signal) - 1
+# Ts = step(t)
+# fs = 1 / Ts
+# t0 = 0
+# tmax = t0 + N * Ts
+# t = t0:Ts:tmax
+# F = fftshift(fft(signal))
+# freqs =  fftshift(fftfreq(length(t), fs))
+
+fc = 0.04
+flt = digitalfilter(Lowpass(fc), Butterworth(5));
+lθ2 = filtfilt(flt, lθ)  #filtered signal
+fig = Figure()
+ax = Axis(fig[1,1], aspect = DataAspect())
+lines!(ax, xy)
+xy2 = cumsum(μ .* Point2f.(reverse.(sincos.(lθ2))))
+lines!(ax, xy2)
+
+
+
+
+
+
+
+fig = Figure()
+ax = Axis(fig[1,1])
+lines(θ)
+
+using Interpolations
+
+
+
+itp = cubic_spline_interpolation(L, θ)
+
+using FFTW
+
+# Number of points
+N = 2^12 - 1
+# Sample spacing
+Ts = 1 / (1.1 * N)
+# Sample rate
+fs = 1 / Ts
+# Start time
+t0 = 0
+tmax = t0 + N * Ts
+
+# time coordinate
+t = t0:Ts:tmax
+
+# The underlying signal here is the sum of a sine wave at 60 cycles per second
+# and its second harmonic (120 cycles per second) at half amplitude. We have
+# discrete observations (samples) of this signal at each time `t`, with `fs`
+# samples per second.
+
+signal = sin.(2π * 60 * t) + .5 * sin.(2π * 120 * t)
+
+# The `fft` function calculates the (discrete) Fourier transform of its input.
+# The first half of the returned array contains the positive frequencies, while
+# the second half contains the negative ones. For visualization purposes, we
+# rearrange the array to have the zero-frequency at the center.
+
+signal = θ
+N = length(signal) - 1
+Ts = step(t)
+fs = 1 / Ts
+# Start time
+t0 = 0
+tmax = t0 + N * Ts
+# time coordinate
+t = t0:Ts:tmax
+
+
+F = fftshift(fft(signal))
+freqs =  fftshift(fftfreq(length(t), fs))
+
+fc = 0.1
+flt = digitalfilter(Lowpass(fc), Butterworth(6));
+d2 = filtfilt(flt, signal)  #filtered signal
+# Plot
+fig = Figure()
+ax = Axis(fig[1,1], title="Signal", xlabel="time (s)")
+lines!(ax, t, signal)
+lines!(ax, t, d2)
+
+ax = Axis(fig[1,2], title="Spectrum", limits = ((0, 5), nothing), xlabel="frequency (Hz)")
+lines!(ax, freqs, abs.(F))
+
+
+
+
+
+
+
+
+
+
+fig = Figure()
+ax = Axis(fig[1,1])
+t, θ = fun(t, xy, poi_index)
+polynom = Polynomials.fit(t, θ, 2)
+scatter!(t, θ)
+ts = range(t[1], t[end], 100)
+lines!(ts, polynom.(ts))

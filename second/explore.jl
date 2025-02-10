@@ -85,6 +85,26 @@ function get_center_rotate(t, spl, poi_index)
     return rot ∘ trans
 end
 
+
+# transform!(runs, [:tij_file, :rectify, :poi] => ByRow(get_txy) => [:t, :xy, :poi_index, :dance_jump])
+# row = runs[8,:]
+# GLMakie.activate!()
+#
+# fig = Figure()
+# ax = Axis(fig[1,1], aspect = DataAspect())
+# lines!(ax, row.xy[1:row.poi_index - 1])
+# scatter!(ax, row.xy[row.poi_index])
+# lines!(ax, row.xy[row.poi_index:end])
+#
+# gluePOI!(row.xy, row.poi_index)
+# lines!(ax, row.xy[1:row.poi_index - 1])
+# scatter!(ax, row.xy[row.poi_index])
+# lines!(ax, row.xy[row.poi_index:end])
+
+
+
+
+
 transform!(runs, [:tij_file, :rectify, :poi] => ByRow(get_txy) => [:t, :xy, :poi_index, :dance_jump])
 transform!(runs, [:xy, :t] => ByRow(get_spline) => :spl)
 transform!(runs, [:t, :spl, :poi_index] => ByRow(get_center_rotate) => :center_rotate)
@@ -118,8 +138,8 @@ function plotone(run_id, xy, poi_index, sxy)
     for r  in (30, 50)
         lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
     end
-    scatter!(ax, xy[1:poi_index], markersize = 2)
-    scatter!(ax, xy[poi_index:end], markersize = 2)
+    lines!(ax, xy[1:poi_index])#, markersize = 2)
+    lines!(ax, xy[poi_index:end])#, markersize = 2)
     lines!(ax, sxy)
     return fig
 end
