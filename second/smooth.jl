@@ -90,8 +90,73 @@ end
 
 GLMakie.activate!()
 
-row = runs[6,:]
+row = runs[7,:]
 t, xy, poi_index = (row.t, row.xy, row.poi_index)
+xy1 = [p1 for (p1, p2) in zip(xy[1:end-1], xy[2:end]) if p1 ≠ p2]
+xy1 = xy1[1:10:end]
+n = length(xy1)
+itp = interpolate(stack(xy1)', (BSpline(Cubic(Natural(OnGrid()))), NoInterp()))
+
+fig = Figure()
+ax = Axis(fig[1,1], aspect = DataAspect())
+scatter!(ax, xy)
+xy2 = [SVector{2, Float64}(itp(i, 1:2)) for i in range(1, n, 100n)]
+lines!(ax, xy2, color = :red)
+
+Δxy = minimum(norm, diff(xy2))/10
+
+function radiallength(itp, i, Δxy)
+    p1 = SVector{2, Float64}(itp(i, 1:2))
+    fun(t) = abs2(norm(SVector{2, Float64}(itp(t, 1:2)) - p1) - Δxy)
+    o = optimize(fun, i, i + 1)
+    # if !Optim.converged(o)
+    #     error()
+    # end
+    # if o.minimum > 0.001
+    #     error()
+    # end
+    return Optim.minimizer(o)
+end
+
+ts = Float64[]
+push!(ts, 1.0)
+while ts[end] < n - 1
+    push!(ts, radiallength(itp, ts[end], Δxy))
+end
+
+xy2 = [SVector{2, Float64}(itp(t, 1:2)) for t in ts]
+maximum(abs2.(norm.(diff(xy2)) .- Δxy))
+
+
+function get_θ(itp, t)
+    x = only(gradient(itp, t, 1))
+    y = only(gradient(itp, t, 2))
+    atan(y, x)
+end
+
+θ = get_θ.(Ref(itp), ts)
+unwrap!(θ)
+
+xy2 = cumsum(Δxy .* Point2f.(reverse.(sincos.(θ))))
+
+fc = 0.5
+flt = digitalfilter(Lowpass(fc), Butterworth(5));
+# flt = digitalfilter(Lowpass(fc), Elliptic(4, 3, 2))
+θ2 = filtfilt(flt, θ)
+# lines(θ)
+# lines!(θ2)
+xy3 = cumsum(Δxy .* Point2f.(reverse.(sincos.(θ2))))
+fig = Figure()
+ax = Axis(fig[1,1], aspect = DataAspect())
+# scatter!(ax, xy)
+lines!(ax, xy2, color = :red)
+lines!(ax, xy3, color = :green)
+
+
+
+
+
+
 Δt = step(t)
 Δ = diff(xy)
 filter!(!iszero, Δ)
