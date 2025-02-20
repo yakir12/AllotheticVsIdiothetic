@@ -8,8 +8,9 @@ using OhMyThreads
 using QuadGK, Optim
 using LsqFit
 using CategoricalArrays
+using DataInterpolations
 
-include("smooth.jl")
+# include("smooth.jl")
 
 tosecond(t::T) where {T <: TimePeriod} = t / convert(T, Dates.Second(1))
 tosecond(t::TimeType) = tosecond(t - Time(0))
@@ -68,8 +69,20 @@ function get_txy(tij_file, rectify, poi)
     (; t, xy, poi_index, dance_jump = Δ)
 end
 function get_spline(xy, t)
-    k, s = (2, 300)
-    tp = ParametricSpline(t, stack(xy); k, s)
+
+    BSplineApprox(xy, t, 2, 10, :Uniform, :Uniform)
+
+n = 10
+t = Float64.(1:n)
+u = rand(SVector{2, Float64}, n)
+LinearInterpolation(u, t)
+
+BSplineApprox(u, t, 2, 3, :Uniform, :Uniform)
+
+    BSplineApprox(xy, t, 2, 10, :Uniform, :Uniform)
+
+    # k, s = (2, 300)
+    # tp = ParametricSpline(t, stack(xy); k, s)
 end
 function get_rotation(p2)
     θ = π/2 - atan(reverse(p2)...)
@@ -123,23 +136,23 @@ transform!(runs, [:t, :spl, :center_rotate] => ByRow((t, spl, tform) -> tform.(S
 #
 # ############ experiment
 
-function center_rotate!(xy, poi_index)
-    xy .-= Ref(xy[1])
-    rot = get_rotation(xy[poi_index])
-    xy .= rot.(xy)
-end
+# function center_rotate!(xy, poi_index)
+#     xy .-= Ref(xy[1])
+#     rot = get_rotation(xy[poi_index])
+#     xy .= rot.(xy)
+# end
+#
+# df = transform(runs, [:xy, :poi_index] => ByRow(center_rotate!) => :xy)
+# transform!(df, [:t, :xy, :poi_index] => ByRow(get_smooth) => [:st, :sxy])
 
-df = transform(runs, [:xy, :poi_index] => ByRow(center_rotate!) => :xy)
-transform!(df, [:t, :xy, :poi_index] => ByRow(get_smooth) => [:st, :sxy])
-
-function plotone(run_id, xy, poi_index, sxy)
+function plotone(run_id, center_rotate, xy, poi_index, sxy)
     fig  = Figure()
     ax = Axis(fig[1,1], aspect = DataAspect(), autolimitaspect = 1, title = string(run_id), limits = ((-60, 60), (-60, 60)))
     for r  in (30, 50)
         lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
     end
-    lines!(ax, xy[1:poi_index])#, markersize = 2)
-    lines!(ax, xy[poi_index:end])#, markersize = 2)
+    lines!(ax, center_rotate.(xy[1:poi_index]))#, markersize = 2)
+    lines!(ax, center_rotate.(xy[poi_index:end]))#, markersize = 2)
     lines!(ax, sxy)
     return fig
 end
@@ -149,8 +162,8 @@ if isdir(path)
 end
 mkpath(path)
 CairoMakie.activate!()
-@tasks for row in eachrow(df)
-    fig = plotone(row.run_id, row.xy, row.poi_index, row.sxy)
+@tasks for row in eachrow(runs)
+    fig = plotone(row.run_id, row.center_rotate, row.xy, row.poi_index, row.sxy)
     save(joinpath(path, string(row.run_id, ".png")), fig)
 end
 

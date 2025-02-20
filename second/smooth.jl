@@ -159,7 +159,7 @@ lines!(ax, xy3, color = :green)
 
 Δt = step(t)
 Δ = diff(xy)
-filter!(!iszero, Δ)
+filter!(!iszero ∘ norm, Δ)
 θ = splat(atan).(reverse.(Δ))
 unwrap!(θ)
 
