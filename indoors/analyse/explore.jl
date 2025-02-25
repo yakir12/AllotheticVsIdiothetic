@@ -1,14 +1,13 @@
-using AlgebraOfGraphics, GLMakie
-using CairoMakie
+using AlgebraOfGraphics, GLMakie, CairoMakie
 
 using Dates, LinearAlgebra, Statistics
-using CSV, DataFrames, DataFramesMeta, CameraCalibrations
+using CSV, DataFrames, CameraCalibrations
 using Interpolations, StaticArrays, Dierckx, CoordinateTransformations, Rotations
 using OhMyThreads
-using QuadGK, Optim
+# using QuadGK, Optim
 using LsqFit
 using CategoricalArrays
-using DataInterpolations
+# using DataInterpolations
 
 # include("smooth.jl")
 
@@ -29,22 +28,21 @@ function get_calibration(calibration_id)
     rectification(c)
 end
 
-const results_dir = "../indoors/tracks and calibrations"
+const results_dir = "../track_calibrate/tracks and calibrations"
 
 runs = CSV.read(joinpath(results_dir, "runs.csv"), DataFrame)
-
 calibs = CSV.read(joinpath(results_dir, "calibs.csv"), DataFrame)
 transform!(calibs, :calibration_id => ByRow(get_calibration) => :rectify)
 transform!(calibs, [:rectify, :center_ij] => ByRow((f, c) -> passmissing(f)(totuple(c))) => :center)
 transform!(calibs, [:rectify, :north_ij] => ByRow((f, c) -> passmissing(f)(totuple(c))) => :north)
 select!(calibs, Cols(:calibration_id, :rectify, :center, :north))
-
 leftjoin!(runs, calibs, on = :calibration_id)
-
 select!(runs, Not(:runs_path, :start_location, :calibration_id, :fps, :target_width, :runs_file, :window_size))
 words = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth", "eleventh", "twelfth"]
 transform!(runs, :dance => ByRow(x -> x ? "dance" : "no dance"), :at_run => (i -> categorical(words[i]; levels = words)), renamecols = false)
-
+rename!(runs, :poi => :treat)
+transform!(runs, :spontaneous_end => ByRow(passmissing(tosecond)), renamecols = false)
+transform!(runs, [:spontaneous_end, :treat] => ByRow(coalesce) => :poi)
 
 function gluePOI!(xy, poi_index)
     diffs = norm.(diff(xy[1:poi_index - 1]))
@@ -59,7 +57,7 @@ function gluePOI!(xy, poi_index)
         return missing
     end
 end
-function get_txy(tij_file, rectify, poi)
+function get_txy(tij_file, rectify, poi::Float64)
     tij = CSV.File(joinpath(results_dir, tij_file))
     t = range(tij.t[1], tij.t[end], length = length(tij))
     poi_index = something(findfirst(≥(poi), t), length(t))
@@ -69,20 +67,8 @@ function get_txy(tij_file, rectify, poi)
     (; t, xy, poi_index, dance_jump = Δ)
 end
 function get_spline(xy, t)
-
-    BSplineApprox(xy, t, 2, 10, :Uniform, :Uniform)
-
-n = 10
-t = Float64.(1:n)
-u = rand(SVector{2, Float64}, n)
-LinearInterpolation(u, t)
-
-BSplineApprox(u, t, 2, 3, :Uniform, :Uniform)
-
-    BSplineApprox(xy, t, 2, 10, :Uniform, :Uniform)
-
-    # k, s = (2, 300)
-    # tp = ParametricSpline(t, stack(xy); k, s)
+    k, s = (2, 300)
+    tp = ParametricSpline(t, stack(xy); k, s)
 end
 function get_rotation(p2)
     θ = π/2 - atan(reverse(p2)...)
@@ -145,29 +131,29 @@ transform!(runs, [:t, :spl, :center_rotate] => ByRow((t, spl, tform) -> tform.(S
 # df = transform(runs, [:xy, :poi_index] => ByRow(center_rotate!) => :xy)
 # transform!(df, [:t, :xy, :poi_index] => ByRow(get_smooth) => [:st, :sxy])
 
-function plotone(run_id, center_rotate, xy, poi_index, sxy)
-    fig  = Figure()
-    ax = Axis(fig[1,1], aspect = DataAspect(), autolimitaspect = 1, title = string(run_id), limits = ((-60, 60), (-60, 60)))
-    for r  in (30, 50)
-        lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
-    end
-    lines!(ax, center_rotate.(xy[1:poi_index]))#, markersize = 2)
-    lines!(ax, center_rotate.(xy[poi_index:end]))#, markersize = 2)
-    lines!(ax, sxy)
-    return fig
-end
-path = "tracks"
-if isdir(path)
-    rm(path, recursive=true)
-end
-mkpath(path)
-CairoMakie.activate!()
-@tasks for row in eachrow(runs)
-    fig = plotone(row.run_id, row.center_rotate, row.xy, row.poi_index, row.sxy)
-    save(joinpath(path, string(row.run_id, ".png")), fig)
-end
+# function plotone(run_id, center_rotate, xy, poi_index, sxy)
+#     fig  = Figure()
+#     ax = Axis(fig[1,1], aspect = DataAspect(), autolimitaspect = 1, title = string(run_id), limits = ((-60, 60), (-60, 60)))
+#     for r  in (30, 50)
+#         lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
+#     end
+#     lines!(ax, center_rotate.(xy[1:poi_index]))#, markersize = 2)
+#     lines!(ax, center_rotate.(xy[poi_index:end]))#, markersize = 2)
+#     lines!(ax, sxy)
+#     return fig
+# end
+# path = "tracks"
+# if isdir(path)
+#     rm(path, recursive=true)
+# end
+# mkpath(path)
+# CairoMakie.activate!()
+# @tasks for row in eachrow(runs)
+#     fig = plotone(row.run_id, row.center_rotate, row.xy, row.poi_index, row.sxy)
+#     save(joinpath(path, string(row.run_id, ".png")), fig)
+# end
 
-askljdhgflsdjhflsdjfhsld
+# askljdhgflsdjhflsdjfhsld
 
 
 
@@ -201,17 +187,18 @@ GLMakie.activate!()
 save("dance_jump.png", hist(collect(skipmissing(runs.dance_jump)), axis = (;xlabel = "Displacement at POI (cm)", ylabel = "#")))
 
 ###########################################
+##### Only shift ##########################
 
-subset!(runs, :light => ByRow(==("shift")))
+df = subset(runs, :light => ByRow(==("shift")))
 
 ######################## plot figure 1 and 2
 function cropto(xy, l)
     i = something(findfirst(>(l) ∘ norm, xy), length(xy))
     xy[1:i-1]
 end
-transform!(runs, :sxy => ByRow(xy -> cropto(xy, 50)); renamecols = false)
+transform!(df, :sxy => ByRow(xy -> cropto(xy, 50)); renamecols = false)
 
-df1 = flatten(runs, :sxy)
+df1 = flatten(df, :sxy)
 transform!(df1, :sxy => [:x, :y])
 
 plt = data(df1) * mapping(:x => "X (cm)", :y => "Y (cm)", group=:run_id => nonnumeric, col = :dance => nonnumeric, row = :at_run => nonnumeric => "at run") * visual(Lines)
@@ -240,7 +227,7 @@ end
 save("figure2.png", fig)
 
 
-df1 = transform(runs, [:xy, :poi_index] => ByRow((x, i) -> x[1:i]) => :xy, [:sxy, :poi_index] => ByRow((x, i) -> x[1:i]) => :sxy)
+df1 = transform(df, [:xy, :poi_index] => ByRow((x, i) -> x[1:i]) => :xy, [:sxy, :poi_index] => ByRow((x, i) -> x[1:i]) => :sxy)
 df1 = flatten(df1, [:sxy, :xy])
 transform!(df1, [:xy, :center_rotate] => ByRow((p, f) -> f(p)) => :xy)
 transform!(df1, :sxy => [:sx, :sy], :xy => [:x, :y])
@@ -294,7 +281,6 @@ function get_turn_profile(t, spl, poi_index, p)
     return rad2deg(abs(θ[end]))
 end
 
-df = copy(runs)
 df.p .= Ref((0.1, 0.25, 0.5, 0.75, 0.9))
 df = flatten(df, :p)
 transform!(df, [:t, :spl, :poi_index, :p] => ByRow(get_turn_profile) => :turn)
@@ -317,7 +303,7 @@ function get_turn_profile(t, spl, poi_index)
     end
     return (; tθ = tθ .- tθ[1], θ = θ)
 end
-df1 = transform(runs, [:t, :spl, :poi_index] => ByRow(get_turn_profile) => [:tθ, :θ])
+df1 = transform(df, [:t, :spl, :poi_index] => ByRow(get_turn_profile) => [:tθ, :θ])
 df2 = flatten(df1, [:θ, :tθ])
 plt = data(df2) * mapping(:tθ => "Time from POI (sec)", :θ => rad2deg => "Turn (°)", group=:run_id => nonnumeric, col = :dance => nonnumeric, row = :at_run => nonnumeric) * visual(Lines)
 fig = draw(plt; figure = (;size = (700, 1000)), axis=(; yticks = [-180, 0, 180]))
@@ -346,29 +332,6 @@ fig = draw(plt; figure = (;size = (400, 1000)))
 save("k.png", fig)
 
 ##################################### DARK
-
-
-runs = CSV.read(joinpath(results_dir, "runs.csv"), DataFrame)
-subset!(runs, :light => ByRow(==("dark")))
-
-calibs = CSV.read(joinpath(results_dir, "calibs.csv"), DataFrame)
-transform!(calibs, :calibration_id => ByRow(get_calibration) => :rectify)
-transform!(calibs, [:rectify, :center_ij] => ByRow((f, c) -> passmissing(f)(totuple(c))) => :center)
-transform!(calibs, [:rectify, :north_ij] => ByRow((f, c) -> passmissing(f)(totuple(c))) => :north)
-select!(calibs, Cols(:calibration_id, :rectify, :center, :north))
-
-leftjoin!(runs, calibs, on = :calibration_id)
-
-select!(runs, Not(:runs_path, :start_location, :calibration_id, :fps, :target_width, :runs_file, :window_size))
-words = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth", "eleventh", "twelfth"]
-transform!(runs, :dance => ByRow(x -> x ? "dance" : "no dance"), :at_run => (i -> categorical(words[i]; levels = words)), renamecols = false)
-
-
-transform!(runs, [:tij_file, :rectify, :poi] => ByRow(get_txy) => [:t, :xy, :poi_index, :dance_jump])
-transform!(runs, [:xy, :t] => ByRow(get_spline) => :spl)
-transform!(runs, [:t, :spl, :poi_index] => ByRow(get_center_rotate) => :center_rotate)
-transform!(runs, [:t, :spl, :center_rotate] => ByRow((t, spl, tform) -> tform.(SVector{2, Float64}.(spl.(t)))) => :sxy)
-
 
 
 

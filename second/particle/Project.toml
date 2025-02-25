@@ -1,7 +1,0 @@
-[deps]
-CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
-Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
-GLMakie = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
-LowLevelParticleFilters = "d9d29d28-c116-5dba-9239-57a5fe23875b"
-Optim = "429524aa-4258-5aef-a3af-852621145aeb"
-StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
