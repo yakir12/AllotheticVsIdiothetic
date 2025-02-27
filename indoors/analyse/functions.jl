@@ -1,5 +1,20 @@
-tosecond(t::T) where {T <: TimeType} = tosecond(t - Time(0))
+const SV = SVector{2, Float64}
 tosecond(t::T) where {T <: TimePeriod} = t / convert(T, Dates.Second(1))
+tosecond(t::TimeType) = tosecond(t - Time(0))
+tosecond(sec::Real) = sec
+function totuple(x::AbstractString)
+    if contains(x, '(')
+        m = match(r"^\((\d+),\s*(\d+)\)$", x)
+        Tuple{Int, Int}(parse.(Int, m.captures))
+    else
+        parse(Int, x)
+    end
+end
+totuple(x) = x
+function get_calibration(calibration_id)
+    c = CameraCalibrations.load(joinpath(results_dir, calibration_id))
+    rectification(c)
+end
 
 function calibrate_and_smooth(c, track, s, k)
     xy_pixels = RowCol.(track.x, track.y)
@@ -57,3 +72,149 @@ function cumulative_angle(f, t1, t2)
     rad2deg(α)
 end
 
+function gluePOI!(xy, poi_index)
+    diffs = norm.(diff(xy[1:poi_index - 1]))
+    μ = mean(diffs)
+    σ = std(diffs)
+    Δ = only(diff(xy[poi_index - 1:poi_index]))
+    l = norm(Δ)
+    if l > μ + 1.5σ
+        xy[poi_index:end] .-= Ref(Δ)
+        return l
+    else
+        return missing
+    end
+end
+function get_txy(tij_file, rectify, poi::Float64)
+    tij = CSV.File(joinpath(results_dir, tij_file))
+    t = range(tij.t[1], tij.t[end], length = length(tij))
+    poi_index = something(findfirst(≥(poi), t), length(t))
+    ij = SVector{2, Int}.(tij.i, tij.j)
+    xy = rectify.(ij)
+    Δ = gluePOI!(xy, poi_index)
+    (; t, xy, poi_index, dance_jump = Δ)
+end
+function get_spline(xy, t)
+    k, s = (3, 300)
+    tp = ParametricSpline(t, stack(xy); k, s)
+end
+function get_rotation(p2)
+    θ = π/2 - atan(reverse(p2)...)
+    LinearMap(Angle2d(θ))
+end
+function get_center_rotate(t, spl, poi_index)
+    f = SVector{2, Float64} ∘ spl
+    p1 = f(t[1])
+    p2 = f(t[poi_index])
+    trans = Translation(-p1)
+    p2 = trans(p2)
+    rot = get_rotation(p2)
+    return rot ∘ trans
+end
+
+function plotone(run_id, xy, poi_index, center_rotate, sxy, t, intervention, spontaneous_end)
+    fig  = Figure()
+    ax = Axis(fig[1,1], aspect = DataAspect(), autolimitaspect = 1, title = string(run_id), limits = ((-60, 60), (-60, 60)))
+    for r  in (30, 50)
+        lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
+    end
+    scatter!(ax, center_rotate.(xy[1:poi_index]), markersize = 2)
+    scatter!(ax, center_rotate.(xy[poi_index:end]), markersize = 2)
+    lines!(ax, sxy[1:poi_index])
+    lines!(ax, sxy[poi_index:end])
+    intervention_i = findfirst(≥(intervention), t)
+    scatter!(ax, sxy[intervention_i], label = "intervention")
+    if !ismissing(spontaneous_end)
+        spontaneous_end_i = findfirst(≥(spontaneous_end), t)
+        scatter!(ax, sxy[spontaneous_end_i], label = "spontaneous dance")
+    end
+    return fig
+end
+
+function cropto(xy, l)
+    i = something(findfirst(>(l) ∘ norm, xy), length(xy))
+    xy[1:i-1]
+end
+
+function unwrap!(x, period = 2π)
+    y = convert(eltype(x), period)
+    v = first(x)
+    for k = eachindex(x)
+        x[k] = v = v + rem(x[k] - v,  y, RoundNearest)
+    end
+    return x
+end
+
+function get_turn_profile(t, spl, poi_index, p)
+    i = round(Int, poi_index*p)
+    der = derivative.(Ref(spl), t[1:i])
+    θ = [atan(reverse(d)...) for d in der]
+    unwrap!(θ)
+    θ .-= θ[1]
+    return rad2deg(abs(θ[end]))
+end
+
+
+function get_turn_profile(t, spl, poi_index)
+    tθ = t[poi_index - 24:end]
+    θ = [atan(reverse(derivative(spl, ti))...) for ti in tθ]
+    θ₀ = θ[1]
+    θ .-= θ₀
+    unwrap!(θ)
+    # m, M = extrema(θ)
+    # if abs(m) > M
+    if mean(θ) < 0
+        θ .*= -1
+    end
+    return (; tθ = tθ .- tθ[1], θ = θ)
+end
+
+function fit_logistic(tθ, θ)
+    lb = [0.0, 0]
+    ub = [100.0, 5pi]
+    p0 = [0.1, pi]
+    model(x, p) = logistic.(x, p[2], p[1], 0)
+    fit = curve_fit(model, tθ, θ, p0, lower = lb, upper = ub)
+    fit.param
+end
+
+function getIQR(x)
+    d = Truncated(Distributions.fit(Normal, x), 0, Inf)
+    c1, μ, c2 = quantile(d, [0.1, 0.5, 0.9])
+    (; c1, μ, c2)
+end
+
+function create_track(k)
+    xy = [zero(Point2f)]
+    t = 0
+    while last(last(xy)) > -50
+        t += 0.1
+        Δ = reverse(sincos(logistic(t, 2π, k, 0) + π/2))
+        push!(xy, xy[end] + Point2f(Δ))
+    end
+    spl = ParametricSpline(range(0, t, length(xy)), stack(xy))
+    xys = Point2f.(spl.(range(0, t, 100)))
+    xys[end] = Point2f(xys[end][1], -50)
+    return xys
+end
+
+logistic(x, L, k, x₀) = L / (1 + exp(-k*(x - x₀))) - L/2
+
+# function arclength(spl, t1, t2; kws...)
+#     knots = get_knots(spl)
+#     filter!(t -> t1 < t < t2, knots)
+#     pushfirst!(knots, t1)
+#     push!(knots, t2)
+#     s, _ = quadgk(t -> norm(derivative(spl, t)), knots; kws...)
+#     return s
+# end
+#
+# function t2length(t, spl)
+#     n = length(t)
+#     l = Vector{Float64}(undef, n)
+#     l[1] = 0.0
+#     for i in 2:n
+#         l[i] = first(quadgk(t -> norm(derivative(spl, t)), t[1], t[i]))
+#     end
+#     return l
+# end
