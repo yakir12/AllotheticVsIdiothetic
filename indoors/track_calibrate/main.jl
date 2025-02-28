@@ -1,4 +1,4 @@
-# using Revise
+using Revise
 using Fromage
 
 data_path = "/home/yakir/mnt/dacke_lab_data/Data/Elin/Project_AllotheticVsIdiothetic_indoors"
