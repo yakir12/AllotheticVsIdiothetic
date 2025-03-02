@@ -178,8 +178,8 @@ transform!(df1, [:c1, :μ, :c2] .=> ByRow(k -> rad2deg.(logistic.(tθ, 2π, k, 0
 df1.tθ .= Ref(tθ)
 df2 = flatten(df1, [:tθ, :θc1, :θμ, :θc2])
 
-plt = data(df2) * mapping(:tθ => "Time from POI (sec)", :θμ, lower = :θc1, upper = :θc2, col = :forced => nonnumeric, row = :at_run => nonnumeric, color = :spontaneous) * visual(LinesFill) 
-fig = draw(plt; axis = (; ylabel = "Turn (°)"))#; figure = (;size = (700, 1000)), axis=(; yticks = [-180, 0, 180]))
+plt = data(df2) * mapping(:tθ => "Time from POI (sec)", :θμ, lower = :θc1, upper = :θc2, col = :forced => nonnumeric, row = :at_run => renamer("1" => "first", "4" => "forth", "10" => "tenth"), color = :spontaneous) * visual(LinesFill) 
+fig = draw(plt; axis = (; ylabel = "Turn (°)"));#; figure = (;size = (700, 1000)), axis=(; yticks = [-180, 0, 180]))
 
 save("mean k.png", fig)
 
@@ -195,7 +195,7 @@ allwords = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "
 words = [string(i) => allwords[i] for i in [1,4,10]]
 df2.at_run .= categorical(df2.at_run; levels = first.(words), ordered = true)
 
-plt = data(df2) * (mapping(:poly, col = :forced => nonnumeric, row = :at_run, color = :spontaneous) * visual(Poly, alpha = 0.01) + mapping(:xμ, :yμ, col = :forced => nonnumeric, row = :at_run, color = :spontaneous) * visual(Lines))
+plt = data(df2) * (mapping(:poly, col = :forced => nonnumeric, row = :at_run => renamer("1" => "first", "4" => "forth", "10" => "tenth"), color = :spontaneous) * visual(Poly, alpha = 0.01) + mapping(:xμ, :yμ, col = :forced => nonnumeric, row = :at_run => renamer("1" => "first", "4" => "forth", "10" => "tenth"), color = :spontaneous) * visual(Lines))
 fig = draw(plt; axis = (; aspect = DataAspect(), xlabel = "X (cm)", ylabel = "Y (cm)"))
 
 save("mean tracks.png", fig)
