@@ -35,7 +35,7 @@ transform!(runs, :sxy => ByRow(xy -> cropto(xy, 50)); renamecols = false)
 transform!(runs, [:t, :spl, :poi_index] => ByRow(get_turn_profile) => [:tθ, :θ])
 transform!(runs, [:tθ, :θ] => ByRow(fit_logistic) => :ks)
 transform!(runs, [:tθ, :ks] => ByRow((x, p) -> logistic.(x, p[2], p[1], 0)) => :θs, :ks => ByRow(first) => :k)
-transform!(runs, :spontaneous_end => ByRow(s -> string(ismissing(s) ? "nothing" : "dance")) => :spontaneous, :runs_dance => ByRow(t -> ismissing(t) ? "nothing" : "dance") => :forced)
+transform!(runs, :spontaneous_end => ByRow(!ismissing) => :spontaneous, :runs_dance => ByRow(!ismissing) => :forced)
 
 @assert all(row -> row.intervention in ClosedInterval(extrema(row.t)...), eachrow(runs)) "intervention is outside time"
 
@@ -62,12 +62,12 @@ df = subset(runs, :light => ByRow(==("shift")))
 ###########################################
 # spontaneous
 
-df1 = subset(runs, :spontaneous => ByRow(==("dance")))
+df1 = subset(runs, :spontaneous)
 
 df1 = flatten(df1, :sxy)
 transform!(df1, :sxy => [:x, :y])
 
-plt = data(df1) * mapping(:x => "X (cm)", :y => "Y (cm)", group=:run_id => nonnumeric, col = :forced => nonnumeric, row = :at_run => nonnumeric => "at run") * visual(Lines)
+plt = data(df1) * mapping(:x => "X (cm)", :y => "Y (cm)", group=:run_id => nonnumeric, col = :forced => renamer(true => "danced", false => "didn't dance"), row = :at_run => nonnumeric => "at run") * visual(Lines)
 fig = draw(plt; axis=(aspect=1, ))
 for ax in fig.figure.content 
     if ax isa Axis
@@ -84,7 +84,7 @@ save("spontaneous.png", fig)
 df1 = flatten(df, :sxy)
 transform!(df1, :sxy => [:x, :y])
 
-plt = data(df1) * mapping(:x => "X (cm)", :y => "Y (cm)", group=:run_id => nonnumeric, col = :forced => nonnumeric, row = :at_run => nonnumeric => "at run") * visual(Lines)
+plt = data(df1) * mapping(:x => "X (cm)", :y => "Y (cm)", group=:run_id => nonnumeric, col = :forced => renamer(true => "danced", false => "didn't dance"), row = :at_run => nonnumeric => "at run") * visual(Lines)
 fig = draw(plt; axis=(aspect=1, ))
 for ax in fig.figure.content 
     if ax isa Axis
@@ -101,7 +101,7 @@ save("figure1.png", fig)
 df1 = flatten(df, :sxy)
 transform!(df1, :sxy => [:x, :y])
 
-plt = data(df1) * mapping(:x => "X (cm)", :y => "Y (cm)", group=:run_id => nonnumeric, col = :forced => nonnumeric, color = :at_run => nonnumeric) * visual(Lines)
+plt = data(df1) * mapping(:x => "X (cm)", :y => "Y (cm)", group=:run_id => nonnumeric, col = :forced => renamer(true => "danced", false => "didn't dance"), color = :at_run => nonnumeric) * visual(Lines)
 fig = draw(plt; axis=(aspect=1, ))
 for ax in fig.figure.content 
     if ax isa Axis
@@ -120,7 +120,7 @@ df1 = flatten(df1, [:sxy, :xy])
 transform!(df1, [:xy, :center_rotate] => ByRow((p, f) -> f(p)) => :xy)
 transform!(df1, :sxy => [:sx, :sy], :xy => [:x, :y])
 d = data(df1)
-m = mapping(group=:run_id => nonnumeric, col = :forced => nonnumeric, row = :at_run => nonnumeric)
+m = mapping(group=:run_id => nonnumeric, col = :forced => renamer(true => "danced", false => "didn't dance"), row = :at_run => nonnumeric)
 
 plt = d * m * (mapping(:x, :y) * visual(Lines) + mapping(:sx, :sy) * visual(Lines, color = :red))
 fig = draw(plt; axis=(aspect=DataAspect(), xlabel = "X (cm)", ylabel = "Y (cm)"), figure = (;size = (1000, 4000)));
@@ -134,7 +134,7 @@ df1.p .= Ref((0.1, 0.25, 0.5, 0.75, 0.9, 1.0, 1.1))
 df1 = flatten(df1, :p)
 transform!(df1, [:t, :spl, :poi_index, :p] => ByRow(get_turn_profile) => :turn)
 
-plt = data(df1) * mapping(:forced, :turn => "Turn (°)", row = :p => (x -> string(round(Int, 100x), " %")), col = :at_run => nonnumeric) * visual(Violin, datalimits=(0, Inf))
+plt = data(df1) * mapping(:forced => renamer(true => "danced", false => "didn't dance"), :turn => "Turn (°)", row = :p => (x -> string(round(Int, 100x), " %")), col = :at_run => nonnumeric) * visual(Violin, datalimits=(0, Inf))
 fig = draw(plt; figure = (;size = (700, 1000)))
 
 save("figure3.png", fig)
@@ -142,7 +142,7 @@ save("figure3.png", fig)
 ###########################################
 
 df2 = flatten(df, [:θ, :tθ])
-plt = data(df2) * mapping(:tθ => "Time from POI (sec)", :θ => rad2deg => "Turn (°)", group=:run_id => nonnumeric, col = :forced => nonnumeric, row = :at_run => nonnumeric) * visual(Lines)
+plt = data(df2) * mapping(:tθ => "Time from POI (sec)", :θ => rad2deg => "Turn (°)", group=:run_id => nonnumeric, col = :forced => renamer(true => "danced", false => "didn't dance"), row = :at_run => nonnumeric) * visual(Lines)
 fig = draw(plt; figure = (;size = (700, 1000)), axis=(; yticks = [-180, 0, 180]))
 
 save("from 1 sec before POI.png", fig)
@@ -164,7 +164,7 @@ save("fits.png", fig)
 
 ###########################################
 
-plt = data(df1) * mapping(:forced, :k, row = :at_run => nonnumeric) * visual(RainClouds, violin_limits = extrema)
+plt = data(df1) * mapping(:forced => renamer(true => "danced", false => "didn't dance"), :k, row = :at_run => nonnumeric) * visual(RainClouds, violin_limits = extrema)
 fig = draw(plt; axis = (; limits=(nothing, (nothing, 4))), figure =(; size = (400, 1000)))
 
 save("k.png", fig)
@@ -178,9 +178,8 @@ transform!(df1, [:c1, :μ, :c2] .=> ByRow(k -> rad2deg.(logistic.(tθ, 2π, k, 0
 df1.tθ .= Ref(tθ)
 df2 = flatten(df1, [:tθ, :θc1, :θμ, :θc2])
 
-plt = data(df2) * mapping(:tθ => "Time from POI (sec)", :θμ, lower = :θc1, upper = :θc2, col = :forced => nonnumeric, row = :at_run => renamer("1" => "first", "4" => "forth", "10" => "tenth"), color = :spontaneous) * visual(LinesFill) 
-fig = draw(plt; axis = (; ylabel = "Turn (°)"));#; figure = (;size = (700, 1000)), axis=(; yticks = [-180, 0, 180]))
-
+plt = data(df2) * mapping(:tθ => "Time from POI (sec)", :θμ, lower = :θc1, upper = :θc2, col = :forced => renamer(true => "forced to dance", false => "weren't forced"), row = :at_run => renamer("1" => "first", "4" => "forth", "10" => "tenth"), color = :spontaneous => renamer(true => "spontaneously danced", false => "no spontaneous dance") => "Spontaneous dance") * visual(LinesFill) 
+fig = draw(plt; axis = (; ylabel = "Turn", yticks = 0:45:180, ytickformat = "{:n}°"));
 save("mean k.png", fig)
 
 ###########################################
@@ -195,7 +194,7 @@ allwords = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "
 words = [string(i) => allwords[i] for i in [1,4,10]]
 df2.at_run .= categorical(df2.at_run; levels = first.(words), ordered = true)
 
-plt = data(df2) * (mapping(:poly, col = :forced => nonnumeric, row = :at_run => renamer("1" => "first", "4" => "forth", "10" => "tenth"), color = :spontaneous) * visual(Poly, alpha = 0.01) + mapping(:xμ, :yμ, col = :forced => nonnumeric, row = :at_run => renamer("1" => "first", "4" => "forth", "10" => "tenth"), color = :spontaneous) * visual(Lines))
+plt = data(df2) * (mapping(:poly, col = :forced => renamer(true => "forced to dance", false => "weren't forced"), row = :at_run => renamer("1" => "first", "4" => "forth", "10" => "tenth"), color = :spontaneous => renamer(true => "spontaneously danced", false => "no spontaneous dance") => "Spontaneous dance") * visual(Poly, alpha = 0.01) + mapping(:xμ, :yμ, col = :forced => renamer(true => "forced to dance", false => "weren't forced"), row = :at_run => renamer("1" => "first", "4" => "forth", "10" => "tenth"), color = :spontaneous => renamer(true => "spontaneously danced", false => "no spontaneous dance") => "") * visual(Lines))
 fig = draw(plt; axis = (; aspect = DataAspect(), xlabel = "X (cm)", ylabel = "Y (cm)"))
 
 save("mean tracks.png", fig)
@@ -203,7 +202,7 @@ save("mean tracks.png", fig)
 
 ###########################################
 
-df1 = subset(df, :forced => ByRow(==("nothing")))
+df1 = subset(df, :forced)
 
 df2 = sort!(df1, :k, rev = true)[1:3,:]
 df2 = flatten(df2, [:θ, :tθ])
