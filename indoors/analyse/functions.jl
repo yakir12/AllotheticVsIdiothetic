@@ -145,18 +145,19 @@ function unwrap!(x, period = 2π)
     return x
 end
 
-function get_turn_profile(t, spl, poi_index, p)
-    i = round(Int, poi_index*p)
-    der = derivative.(Ref(spl), t[1:i])
-    θ = [atan(reverse(d)...) for d in der]
-    unwrap!(θ)
-    θ .-= θ[1]
-    return rad2deg(abs(θ[end]))
-end
+# function get_turn_profile(t, spl, poi_index, p)
+#     i = round(Int, poi_index*p)
+#     der = derivative.(Ref(spl), t[1:i])
+#     θ = [atan(reverse(d)...) for d in der]
+#     unwrap!(θ)
+#     θ .-= θ[1]
+#     return rad2deg(abs(θ[end]))
+# end
 
 
 function get_turn_profile(t, spl, poi_index)
-    tθ = t[poi_index - 24:end]
+    Δ = round(Int, 1/step(t))
+    tθ = t[poi_index - Δ:end]
     θ = [atan(reverse(derivative(spl, ti))...) for ti in tθ]
     θ₀ = θ[1]
     θ .-= θ₀
@@ -180,7 +181,7 @@ end
 
 function getIQR(x)
     d = Truncated(Distributions.fit(Normal, x), 0, Inf)
-    c1, μ, c2 = quantile(d, [0.1, 0.5, 0.9])
+    c1, μ, c2 = quantile(d, [0.05, 0.5, 0.95])
     (; c1, μ, c2)
 end
 
@@ -200,15 +201,22 @@ end
 
 logistic(x, L, k, x₀) = L / (1 + exp(-k*(x - x₀))) - L/2
 
-# function arclength(spl, t1, t2; kws...)
-#     knots = get_knots(spl)
-#     filter!(t -> t1 < t < t2, knots)
-#     pushfirst!(knots, t1)
-#     push!(knots, t2)
-#     s, _ = quadgk(t -> norm(derivative(spl, t)), knots; kws...)
-#     return s
-# end
-#
+function arclength(spl, t1, t2; kws...)
+    knots = get_knots(spl)
+    filter!(t -> t1 < t < t2, knots)
+    pushfirst!(knots, t1)
+    push!(knots, t2)
+    s, _ = quadgk(t -> norm(derivative(spl, t)), knots; kws...)
+    return s
+end
+
+function get_mean_speed(t, spl, poi_index)
+    t1 = t[poi_index]
+    t2 = t[end]
+    s = arclength(spl, t1, t2)
+    return s / (t2 - t1)
+end
+
 # function t2length(t, spl)
 #     n = length(t)
 #     l = Vector{Float64}(undef, n)
