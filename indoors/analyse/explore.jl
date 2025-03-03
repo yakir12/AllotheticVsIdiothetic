@@ -239,35 +239,38 @@ save("fastest no dance.png", fig)
 #############################
 
 
-hist(log.(df.k))
-
 using GLM
 
+m1 = glm(@formula(k ~ danced*at_run), df, Gamma())
+m2 = glm(@formula(k ~ danced + at_run), df, Gamma())
+m3 = glm(@formula(k ~ danced), df, Gamma())
+lrtest(m1.model, m2.model)
+lrtest(m2.model, m3.model)
 
-m1 = lm(@formula(log(k) ~ danced*at_run), df)
-m2 = lm(@formula(log(k) ~ danced + at_run), df)
-m3 = lm(@formula(log(k) ~ danced), df)
-ftest(m1.model, m2.model)
-ftest(m2.model, m3.model)
+newx = select(combine(groupby(df, :danced), :k => mean => :k), Not(:k))
+k = predict(m3, newx; interval = :confidence, level = 0.95)
+df1 = hcat(newx, k)
 
-function coefplot2(m)
-    n = coefnames(m)[2:end] # no intercept
-    vals = coef(m)[2:end]
-    errors = stderror(m)[2:end]
-    errorbars(n, vals, 1.96 .* errors)
-end
+tθ = range(0, 20, 1000)
+transform!(df1, [:lower, :prediction, :upper] .=> ByRow(k -> rad2deg.(logistic.(tθ, 2π, k, 0))) .=> [:θc1, :θμ, :θc2])
+df1.tθ .= Ref(tθ)
+df2 = flatten(df1, [:tθ, :θc1, :θμ, :θc2])
 
-coefplot2(m3)
+plt = data(df2) * mapping(:tθ => "Time from POI (sec)", :θμ, lower = :θc1, upper = :θc2, color = :danced => sorter("no", "spontaneous", "induced") => "Dance") * visual(LinesFill) 
+fig = draw(plt; axis = (; xscale = Makie.pseudolog10,  ylabel = "Turn", yticks = 0:45:180, ytickformat = "{:n}°"))#, limits = (extrema(tθ), (0, 180))))
 
+save("mean k.png", fig)
 
 
 
-using MixedModelsMakie
 
-fm = @formula(log(k) ~ danced)
-fm1 = MixedModelsMakie.fit(LinearModel, fm, df)
+save("k.png", fig)
 
-coefplot(fm1)
+
+
+
+
+
 
 ##################################### DARK
 
