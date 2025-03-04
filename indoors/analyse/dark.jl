@@ -13,6 +13,7 @@ using QuadGK
 include("functions.jl")
 # include("smooth.jl")
 
+output = "dark"
 
 const results_dir = "../track_calibrate/tracks and calibrations"
 
@@ -43,27 +44,11 @@ transform!(runs, [:t, :spl, :poi_index] => ByRow(get_mean_speed) => :speed)
 runs.danced .= categorical(runs.danced; levels = ["no", "spontaneous", "induced"], ordered = true)
 
 
-@assert all(row -> row.intervention in ClosedInterval(extrema(row.t)...), eachrow(runs)) "intervention is outside time"
-
-######################## plot tracks
-path = "tracks"
-if isdir(path)
-    rm(path, recursive=true)
-end
-mkpath(path)
-CairoMakie.activate!()
-@tasks for row in eachrow(runs)
-    fig = plotone(row.run_id, row.xy, row.poi_index, row.center_rotate, row.sxy, row.t, row.intervention, row.spontaneous_end)
-    save(joinpath(path, string(row.run_id, ".png")), fig)
-end
-GLMakie.activate!()
-
-save("dance_jump.png", hist(collect(skipmissing(runs.dance_jump)), axis = (;xlabel = "Displacement at POI (cm)", ylabel = "#")))
 
 ###########################################
 ##### Only shift ##########################
 
-df = subset(runs, :light => ByRow(==("shift")))
+df = subset(runs, :light => ByRow(==("dark")))
 
 ###########################################
 # spontaneous
@@ -85,7 +70,7 @@ for ax in fig.figure.content
     end
 end
 
-save("spontaneous.png", fig)
+save(joinpath(output, "spontaneous.png"), fig)
 
 ###########################################
 
@@ -102,7 +87,7 @@ for ax in fig.figure.content
     end
 end
 
-save("figure1.png", fig)
+save(joinpath(output, "figure1.png"), fig)
 
 ###########################################
 
@@ -119,9 +104,9 @@ for ax in fig.figure.content
     end
 end
 
-save("figure2.png", fig)
+save(joinpath(output, "figure2.png"), fig)
 
-###########################################
+     #)##########################################
 
 df1 = transform(df, [:xy, :poi_index] => ByRow((x, i) -> x[1:i]) => :xy, [:sxy, :poi_index] => ByRow((x, i) -> x[1:i]) => :sxy)
 df1 = flatten(df1, [:sxy, :xy])
@@ -133,7 +118,7 @@ m = mapping(group=:run_id => nonnumeric, col = :danced => sorter("no", "spontane
 plt = d * m * (mapping(:x, :y) * visual(Lines) + mapping(:sx, :sy) * visual(Lines, color = :red))
 fig = draw(plt; axis=(aspect=DataAspect(), xlabel = "X (cm)", ylabel = "Y (cm)"), figure = (;size = (1000, 4000)))
 
-save("start to POI.png", fig)
+save(joinpath(output, "start to POI.png"), fig)
 
 ###########################################
 
@@ -154,7 +139,7 @@ df2 = flatten(df, [:θ, :tθ])
 plt = data(df2) * mapping(:tθ => "Time from POI (sec)", :θ => rad2deg => "Turn (°)", group=:run_id => nonnumeric, col = :danced => sorter("no", "spontaneous", "induced"), row = :at_run => renamer(words)) * visual(Lines)
 fig = draw(plt; axis=(; yticks = [-180, 0, 180]))
 
-save("from 1 sec before POI.png", fig)
+save(joinpath(output, "from 1 sec before POI.png"), fig)
 
 ###########################################
 
@@ -169,23 +154,23 @@ df2 = flatten(df1, [:tθ, :θ, :θs])
 plt = data(df2) * (mapping(:tθ => "Time from POI (sec)", :θ => rad2deg => "Turn (°)", col = :col => nonnumeric, row = :row => nonnumeric) * visual(Lines) + mapping(:tθ => "Time from POI (sec)", :θs => rad2deg => "Turn (°)", col = :col => nonnumeric, row = :row => nonnumeric) * visual(Lines, color = :red))
 fig = draw(plt; figure = (;size = (2000, 2000)), axis = (; limits = ((0, 60), (nothing, 400))))
 
-save("fits.png", fig)
+save(joinpath(output, "fits.png"), fig)
 
 ###########################################
 
 plt = data(df1) * mapping(:danced => sorter("no", "spontaneous", "induced"), :k, row = :at_run => renamer(words)) * visual(RainClouds, violin_limits = extrema)
 fig = draw(plt; axis = (; limits=(nothing, (nothing, 4))), figure =(; size = (400, 1000)))
 
-save("k.png", fig)
+save(joinpath(output, "k.png"), fig)
 
 ###########################################
 
 plt = data(df) * mapping(:danced => sorter("no", "spontaneous", "induced"), :speed => "Speed (cm/s)", row = :at_run => renamer(words)) * visual(RainClouds, violin_limits = (0, Inf))
 fig = draw(plt; figure =(; size = (400, 1000)))
 
-save("speed1.png", fig)
+save(joinpath(output, "speed1.png"), fig)
 
-hist(df.speed; axis = ( ;xlabel = "Speed (cm/s)")) |> save("speed2.png")
+hist(df.speed; axis = ( ;xlabel = "Speed (cm/s)")) |> save(joinpath(output, "speed2.png"))
 
 ###########################################
 
@@ -196,7 +181,7 @@ df1.tθ .= Ref(tθ)
 df2 = flatten(df1, [:tθ, :θc1, :θμ, :θc2])
 plt = data(df2) * mapping(:tθ => "Time from POI (sec)", :θμ, lower = :θc1, upper = :θc2, row = :at_run => renamer(words), color = :danced => sorter("no", "spontaneous", "induced") => "Dance") * visual(LinesFill) 
 fig = draw(plt; axis = (; xscale = Makie.pseudolog10,  ylabel = "Turn", yticks = 0:45:180, ytickformat = "{:n}°"))#, limits = (extrema(tθ), (0, 180))))
-save("mean k.png", fig)
+save(joinpath(output, "mean k.png"), fig)
 
 # plt = data(df2) * mapping(:tθ => "Time from POI (sec)", :θμ, lower = :θc1, upper = :θc2, color = :at_run => renamer("1" => "first", "4" => "forth", "10" => "tenth"), row = :danced => sorter("no", "spontaneous", "induced") => "Dance") * visual(LinesFill) 
 # fig = draw(plt; axis = (; xscale = Makie.pseudolog10,  ylabel = "Turn", yticks = 0:45:180, ytickformat = "{:n}°"))#, limits = (extrema(tθ), (0, 180))))
@@ -221,7 +206,7 @@ plt = data(df2) * (
                   )
 fig = draw(plt; axis = (; aspect = DataAspect(), xlabel = "X (cm)", ylabel = "Y (cm)"))
 
-save("mean tracks.png", fig)
+save(joinpath(output, "mean tracks.png"), fig)
 
 
 
@@ -233,7 +218,7 @@ df2 = sort!(df1, :k, rev = true)[1:3,:]
 df2 = flatten(df2, [:θ, :tθ])
 fig = data(df2) * mapping(:tθ => "Time from POI (sec)", :θ => rad2deg => "Turn (°)", group = :run_id => nonnumeric) * visual(Lines) |> draw
 
-save("fastest no dance.png", fig)
+save(joinpath(output, "fastest no dance.png"), fig)
 
 
 #############################
@@ -241,7 +226,11 @@ save("fastest no dance.png", fig)
 
 using GLM
 
-m1 = glm(@formula(k ~ danced*at_run), df, Gamma())
+df1 = select(subset(df, :danced => ByRow(≠("spontaneous"))), Cols(:danced, :k))
+data(df1) * mapping(:danced, :k) * visual(RainClouds, violin_limits = (0, Inf)) |> draw
+
+m1 = glm(@formula(k ~ danced), df1, Gamma())
+
 m2 = glm(@formula(k ~ danced + at_run), df, Gamma())
 m3 = glm(@formula(k ~ danced), df, Gamma())
 lrtest(m1.model, m2.model)
@@ -259,12 +248,8 @@ df2 = flatten(df1, [:tθ, :θc1, :θμ, :θc2])
 plt = data(df2) * mapping(:tθ => "Time from POI (sec)", :θμ, lower = :θc1, upper = :θc2, color = :danced => sorter("no", "spontaneous", "induced") => "Dance") * visual(LinesFill) 
 fig = draw(plt; axis = (; xscale = Makie.pseudolog10,  ylabel = "Turn", yticks = 0:45:180, ytickformat = "{:n}°"))#, limits = (extrema(tθ), (0, 180))))
 
-save("mean k.png", fig)
+save(joinpath(output, "mean k.png"), fig)
 
-
-
-
-save("k.png", fig)
 
 
 
