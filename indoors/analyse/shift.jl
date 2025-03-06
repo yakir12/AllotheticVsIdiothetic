@@ -160,14 +160,10 @@ save(joinpath(output, "from 1 sec before POI.png"), fig)
 ###########################################
 
 # df1 = vcat(df, transform(df, :at_run => ByRow(_ -> "all"), renamecols = false))
-df1 = deepcopy(df)
 
-df1.row_number .= 1:nrow(df1)
-n = ceil(Int, sqrt(nrow(df1)))
-transform!(df1, :row_number => ByRow(i -> Tuple(CartesianIndices((n, n))[i])) => [:row, :col])
-df2 = flatten(df1, [:tθ, :θ, :θs])
+df1 = flatten(df, [:tθ, :θ, :θs])
 
-plt = data(df2) * (mapping(:tθ => "Time from POI (sec)", :θ => rad2deg => "Turn (°)", col = :col => nonnumeric, row = :row => nonnumeric) * visual(Lines) + mapping(:tθ => "Time from POI (sec)", :θs => rad2deg => "Turn (°)", col = :col => nonnumeric, row = :row => nonnumeric) * visual(Lines, color = :red))
+plt = data(df1) * (mapping(:tθ => "Time from POI (sec)", :θ => rad2deg => "Turn (°)", layout = :run_id => nonnumeric) * visual(Lines) + mapping(:tθ => "Time from POI (sec)", :θs => rad2deg => "Turn (°)", layout = :run_id => nonnumeric) * visual(Lines, color = :red))
 fig = draw(plt; figure = (;size = (2000, 2000)), axis = (; limits = ((0, 60), (nothing, 400))))
 
 save(joinpath(output, "fits.png"), fig)
