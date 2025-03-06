@@ -85,14 +85,22 @@ function gluePOI!(xy, poi_index)
         return missing
     end
 end
-function get_txy(tij_file, rectify, poi::Float64)
+function get_txy(tij_file, rectify)
     tij = CSV.File(joinpath(results_dir, tij_file))
     t = range(tij.t[1], tij.t[end], length = length(tij))
-    poi_index = something(findfirst(≥(poi), t), length(t))
     ij = SVector{2, Int}.(tij.i, tij.j)
     xy = rectify.(ij)
+    (; t, xy)
+end
+impute_poi_time(_, _, poi::Float64) = poi
+function impute_poi_time(t, xy, ::Missing)
+    poi_index = something(findfirst(>(10) ∘ norm, xy .- Ref(xy[1])), length(xy))
+    t[poi_index]
+end
+function glue_poi_index!(xy, t, poi::Float64)
+    poi_index = something(findfirst(≥(poi), t), length(t))
     Δ = gluePOI!(xy, poi_index)
-    (; t, xy, poi_index, dance_jump = Δ)
+    (; poi_index, dance_jump = Δ)
 end
 function get_spline(xy, t)
     k, s = (3, 300)
@@ -129,6 +137,12 @@ function plotone(run_id, xy, poi_index, center_rotate, sxy, t, intervention, spo
         scatter!(ax, sxy[spontaneous_end_i], label = "spontaneous dance")
     end
     return fig
+end
+
+function smooth_center(t, spl)
+    xy = SVector{2, Float64}.(spl.(t))
+    xy .-= Ref(xy[1])
+    return xy
 end
 
 function cropto(xy, l)

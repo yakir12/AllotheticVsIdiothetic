@@ -24,6 +24,10 @@ select!(calibs, Cols(:calibration_id, :rectify))
 leftjoin!(runs, calibs, on = :calibration_id)
 select!(runs, Not(:runs_path, :start_location, :calibration_id, :fps, :target_width, :runs_file, :window_size))
 
+transform!(runs, [:tij_file, :rectify] => ByRow(get_txy) => [:t, :xy])
+transform!(runs, [:t, :xy, :poi] => ByRow(impute_poi_time) => :poi)
+transform!(runs, [:xy, :t, :poi] => ByRow(glue_poi_index!) => [:poi_index, :dance_jump])
+
 # transform!(runs, :dance => ByRow(x -> x ? "dance" : "no dance"), renamecols = false)
 rename!(runs, :poi => :intervention)
 transform!(runs, :spontaneous_end => ByRow(passmissing(tosecond)), renamecols = false)
@@ -36,12 +40,12 @@ transform!(runs, :t => ByRow(x -> similar(x, Float64)) => :l)
 Threads.@threads for row in eachrow(runs)
     row.l = get_pathlength(row.t, row.spl)
 end
-    
-transform!(runs, [:t, :spl] => ByRow(get_pathlength) => :l)
 
 transform!(runs, [:t, :spl, :poi_index] => ByRow(get_center_rotate) => :center_rotate)
+transform!(runs, [:t, :spl] => ByRow(smooth_center) => :smooth_xy)
+transform!(runs, :smooth_xy => ByRow(xy -> cropto(xy, 50)) => :smooth_xy)
 transform!(runs, [:t, :spl, :center_rotate] => ByRow((t, spl, tform) -> tform.(SVector{2, Float64}.(spl.(t)))) => :sxy)
-transform!(runs, :sxy => ByRow(xy -> cropto(xy, 50)); renamecols = false)
+transform!(runs, :sxy => ByRow(xy -> cropto(xy, 50)) => :sxy)
 transform!(runs, [:t, :spl, :poi_index] => ByRow(get_turn_profile) => [:tθ, :θ])
 transform!(runs, [:tθ, :θ] => ByRow(fit_logistic) => :ks)
 transform!(runs, [:tθ, :ks] => ByRow((x, p) -> logistic.(x, p[2], p[1], 0)) => :θs, :ks => ByRow(first) => :k)
@@ -51,8 +55,34 @@ transform!(runs, [:t, :spl, :poi_index] => ByRow(get_mean_speed) => :speed)
 
 runs.danced .= categorical(runs.danced; levels = ["no", "spontaneous", "induced"], ordered = true)
 
+######################## Figure 1
 
-@assert all(row -> row.intervention in ClosedInterval(extrema(row.t)...), eachrow(runs)) "intervention is outside time"
+df = subset(runs, :light => ByRow(∈(("remain", "dark"))))
+df1 = flatten(df, :smooth_xy)
+transform!(df1, :smooth_xy => [:x, :y])
+plt = data(df1) * mapping(:x => "X (cm)", :y => "Y (cm)", group=:run_id => nonnumeric, col = :light => sorter("remain", "dark")) * visual(Lines)
+fig = draw(plt; axis=(aspect=DataAspect(), ))
+
+for ax in fig.figure.content 
+    if ax isa Axis
+        for r  in (30, 50)
+            lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
+        end
+    end
+end
+
+save(joinpath(output, "figure1.png"), fig)
+
+
+
+
+
+
+
+
+
+
+
 
 ######################## plot tracks
 path = "tracks"
