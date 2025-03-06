@@ -11,26 +11,34 @@ using IntervalSets
 using QuadGK
 
 include("functions.jl")
-# include("smooth.jl")
 
-output = "dark"
+output = "figures"
+mkpath("figures")
 
 const results_dir = "../track_calibrate/tracks and calibrations"
 
 runs = CSV.read(joinpath(results_dir, "runs.csv"), DataFrame)
 calibs = CSV.read(joinpath(results_dir, "calibs.csv"), DataFrame)
 transform!(calibs, :calibration_id => ByRow(get_calibration) => :rectify)
-transform!(calibs, [:rectify, :center_ij] => ByRow((f, c) -> passmissing(f)(totuple(c))) => :center)
-transform!(calibs, [:rectify, :north_ij] => ByRow((f, c) -> passmissing(f)(totuple(c))) => :north)
-select!(calibs, Cols(:calibration_id, :rectify, :center, :north))
+select!(calibs, Cols(:calibration_id, :rectify))
 leftjoin!(runs, calibs, on = :calibration_id)
 select!(runs, Not(:runs_path, :start_location, :calibration_id, :fps, :target_width, :runs_file, :window_size))
-transform!(runs, :dance => ByRow(x -> x ? "dance" : "no dance"), renamecols = false)
+
+# transform!(runs, :dance => ByRow(x -> x ? "dance" : "no dance"), renamecols = false)
 rename!(runs, :poi => :intervention)
 transform!(runs, :spontaneous_end => ByRow(passmissing(tosecond)), renamecols = false)
 transform!(runs, [:spontaneous_end, :intervention] => ByRow(coalesce) => :poi)
 transform!(runs, [:tij_file, :rectify, :poi] => ByRow(get_txy) => [:t, :xy, :poi_index, :dance_jump])
 transform!(runs, [:xy, :t] => ByRow(get_spline) => :spl)
+
+
+transform!(runs, :t => ByRow(x -> similar(x, Float64)) => :l)
+Threads.@threads for row in eachrow(runs)
+    row.l = get_pathlength(row.t, row.spl)
+end
+    
+transform!(runs, [:t, :spl] => ByRow(get_pathlength) => :l)
+
 transform!(runs, [:t, :spl, :poi_index] => ByRow(get_center_rotate) => :center_rotate)
 transform!(runs, [:t, :spl, :center_rotate] => ByRow((t, spl, tform) -> tform.(SVector{2, Float64}.(spl.(t)))) => :sxy)
 transform!(runs, :sxy => ByRow(xy -> cropto(xy, 50)); renamecols = false)
@@ -44,11 +52,27 @@ transform!(runs, [:t, :spl, :poi_index] => ByRow(get_mean_speed) => :speed)
 runs.danced .= categorical(runs.danced; levels = ["no", "spontaneous", "induced"], ordered = true)
 
 
+@assert all(row -> row.intervention in ClosedInterval(extrema(row.t)...), eachrow(runs)) "intervention is outside time"
+
+######################## plot tracks
+path = "tracks"
+if isdir(path)
+    rm(path, recursive=true)
+end
+mkpath(path)
+CairoMakie.activate!()
+@tasks for row in eachrow(runs)
+    fig = plotone(row.run_id, row.xy, row.poi_index, row.center_rotate, row.sxy, row.t, row.intervention, row.spontaneous_end)
+    save(joinpath(path, string(row.run_id, ".png")), fig)
+end
+GLMakie.activate!()
+
+save(joinpath(output, "dance_jump.png"), hist(collect(skipmissing(runs.dance_jump)), axis = (;xlabel = "Displacement at POI (cm)", ylabel = "#")))
 
 ###########################################
 ##### Only shift ##########################
 
-df = subset(runs, :light => ByRow(==("dark")))
+df = subset(runs, :light => ByRow(==("shift")))
 
 ###########################################
 # spontaneous
@@ -137,7 +161,8 @@ save(joinpath(output, "start to POI.png"), fig)
 
 df2 = flatten(df, [:θ, :tθ])
 plt = data(df2) * mapping(:tθ => "Time from POI (sec)", :θ => rad2deg => "Turn (°)", group=:run_id => nonnumeric, col = :danced => sorter("no", "spontaneous", "induced"), row = :at_run => renamer(words)) * visual(Lines)
-fig = draw(plt; axis=(; limits = ((0,50), (-200, 200)), yticks = [-180, 0, 180]))
+fig = draw(plt; axis=(; yticks = [-180, 0, 180]))
+
 save(joinpath(output, "from 1 sec before POI.png"), fig)
 
 ###########################################
@@ -225,11 +250,7 @@ save(joinpath(output, "fastest no dance.png"), fig)
 
 using GLM
 
-df1 = select(subset(df, :danced => ByRow(≠("spontaneous"))), Cols(:danced, :k))
-data(df1) * mapping(:danced, :k) * visual(RainClouds, violin_limits = (0, Inf)) |> draw
-
-m1 = glm(@formula(k ~ danced), df1, Gamma())
-
+m1 = glm(@formula(k ~ danced*at_run), df, Gamma())
 m2 = glm(@formula(k ~ danced + at_run), df, Gamma())
 m3 = glm(@formula(k ~ danced), df, Gamma())
 lrtest(m1.model, m2.model)

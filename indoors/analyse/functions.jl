@@ -210,6 +210,15 @@ function arclength(spl, t1, t2; kws...)
     return s
 end
 
+function get_pathlength(t, spl)
+    n = length(t)
+    l = zeros(n)
+    for i in 2:n
+        l[i] = arclength(spl, t[i-1], t[i])
+    end
+    return cumsum(l)
+end
+
 function get_mean_speed(t, spl, poi_index)
     t1 = t[poi_index]
     t2 = t[end]
