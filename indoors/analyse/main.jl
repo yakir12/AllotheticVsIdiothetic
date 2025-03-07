@@ -32,7 +32,6 @@ transform!(runs, [:xy, :t, :poi] => ByRow(glue_poi_index!) => [:poi_index, :danc
 rename!(runs, :poi => :intervention)
 transform!(runs, :spontaneous_end => ByRow(passmissing(tosecond)), renamecols = false)
 transform!(runs, [:spontaneous_end, :intervention] => ByRow(coalesce) => :poi)
-transform!(runs, [:tij_file, :rectify, :poi] => ByRow(get_txy) => [:t, :xy, :poi_index, :dance_jump])
 transform!(runs, [:xy, :t] => ByRow(get_spline) => :spl)
 
 
@@ -58,6 +57,9 @@ runs.danced .= categorical(runs.danced; levels = ["no", "spontaneous", "induced"
 ######################## Figure 1
 
 df = subset(runs, :light => ByRow(∈(("remain", "dark"))))
+transform!(groupby(df, :light), eachindex => :n)
+subset!(df, :n => ByRow(≤(10)))
+
 df1 = flatten(df, :smooth_xy)
 transform!(df1, :smooth_xy => [:x, :y])
 plt = data(df1) * mapping(:x => "X (cm)", :y => "Y (cm)", group=:run_id => nonnumeric, col = :light => sorter("remain", "dark")) * visual(Lines)
@@ -78,7 +80,7 @@ save(joinpath(output, "figure1.png"), fig)
 
 
 
-
+ksdjhflhlhlhdsa
 
 
 
