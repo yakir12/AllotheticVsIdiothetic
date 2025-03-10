@@ -40,6 +40,16 @@ function track_function(start, POI, c, track; s = 100, k = 2)
     return cr ∘ spl
 end
 
+function clean_coords!(xy)
+    for i in 2:length(xy)
+        Δ = norm(xy[i] - xy[i - 1])
+        if Δ < 1
+            xy[i] = xy[i - 1]
+        end
+    end
+    return xy
+end
+
 
 cordlength(rotated) = cordlength(rotated.xy[rotated.i:end])
 cordlength(xy::Vector{SV}) = norm(diff([xy[1], xy[end]]))
@@ -169,6 +179,16 @@ end
 # end
 
 
+function get_turn_profile(t, spl)
+    θ = [atan(reverse(derivative(spl, ti))...) for ti in t]
+    θ .-= θ[1]
+    unwrap!(θ)
+    if mean(θ) < 0
+        θ .*= -1
+    end
+    return θ
+end
+
 function get_turn_profile(t, spl, poi_index)
     Δ = round(Int, 1/step(t))
     tθ = t[poi_index - Δ:end]
@@ -194,8 +214,9 @@ function fit_logistic(tθ, θ)
 end
 
 function getIQR(x)
+    α = 0.05
     d = Truncated(Distributions.fit(Normal, x), 0, Inf)
-    c1, μ, c2 = quantile(d, [0.05, 0.5, 0.95])
+    c1, μ, c2 = quantile(d, [α/2, 0.5, 1 - α/2])
     (; c1, μ, c2)
 end
 

@@ -10,6 +10,8 @@ using Distributions
 using IntervalSets
 using QuadGK
 
+GLMakie.activate!()
+
 include("functions.jl")
 
 output = "figures"
@@ -25,6 +27,7 @@ leftjoin!(runs, calibs, on = :calibration_id)
 select!(runs, Not(:runs_path, :start_location, :calibration_id, :fps, :target_width, :runs_file, :window_size))
 
 transform!(runs, [:tij_file, :rectify] => ByRow(get_txy) => [:t, :xy])
+transform!(runs, :xy => ByRow(clean_coords!) => :xy)
 transform!(runs, [:t, :xy, :poi] => ByRow(impute_poi_time) => :poi)
 transform!(runs, [:xy, :t, :poi] => ByRow(glue_poi_index!) => [:poi_index, :dance_jump])
 
@@ -40,12 +43,14 @@ Threads.@threads for row in eachrow(runs)
     row.l = get_pathlength(row.t, row.spl)
 end
 
+
 transform!(runs, [:t, :spl, :poi_index] => ByRow(get_center_rotate) => :center_rotate)
 transform!(runs, [:t, :spl] => ByRow(smooth_center) => :smooth_xy)
-transform!(runs, :smooth_xy => ByRow(xy -> cropto(xy, 50)) => :smooth_xy)
+transform!(runs, [:l, :smooth_xy] => ByRow((l, xy) -> norm.(xy) ./ l) => :straightness)
 transform!(runs, [:t, :spl, :center_rotate] => ByRow((t, spl, tform) -> tform.(SVector{2, Float64}.(spl.(t)))) => :sxy)
 transform!(runs, :sxy => ByRow(xy -> cropto(xy, 50)) => :sxy)
 transform!(runs, [:t, :spl, :poi_index] => ByRow(get_turn_profile) => [:tθ, :θ])
+transform!(runs, [:t, :spl] => ByRow(get_turn_profile) => :Θ)
 transform!(runs, [:tθ, :θ] => ByRow(fit_logistic) => :ks)
 transform!(runs, [:tθ, :ks] => ByRow((x, p) -> logistic.(x, p[2], p[1], 0)) => :θs, :ks => ByRow(first) => :k)
 transform!(runs, :spontaneous_end => ByRow(!ismissing) => :spontaneous, :runs_dance => ByRow(!ismissing) => :induced)
@@ -56,14 +61,18 @@ runs.danced .= categorical(runs.danced; levels = ["no", "spontaneous", "induced"
 
 ######################## Figure 1
 
+
 df = subset(runs, :light => ByRow(∈(("remain", "dark"))))
+subset!(df, :smooth_xy => ByRow(≥(50) ∘ norm ∘ last))
+transform!(df, :smooth_xy => ByRow(xy -> cropto(xy, 50)) => :smooth_xy)
 transform!(groupby(df, :light), eachindex => :n)
 subset!(df, :n => ByRow(≤(10)))
 
+
 df1 = flatten(df, :smooth_xy)
 transform!(df1, :smooth_xy => [:x, :y])
-plt = data(df1) * mapping(:x => "X (cm)", :y => "Y (cm)", group=:run_id => nonnumeric, col = :light => sorter("remain", "dark")) * visual(Lines)
-fig = draw(plt; axis=(aspect=DataAspect(), ))
+plt = data(df1) * mapping(:x => "X (cm)", :y => "Y (cm)", group=:run_id => nonnumeric, col = :light => renamer("remain" => "Remain", "dark" => "Dark")) * visual(Lines)
+fig = draw(plt; figure = (; size = (800, 400)), axis=(aspect=DataAspect(), ))
 
 for ax in fig.figure.content 
     if ax isa Axis
@@ -76,11 +85,126 @@ end
 save(joinpath(output, "figure1.png"), fig)
 
 
+######################### Figure 2
 
 
+df = subset(runs, :light => ByRow(∈(("remain", "dark"))))
+df1 = flatten(df, [:l, :Θ])
+
+plt = data(df1) * mapping(:l => "Path length (cm)", :Θ => rad2deg => "θ (°)", group = :run_id => nonnumeric, col = :light => renamer("remain" => "Remain", "dark" => "Dark")) * visual(Lines)
+fig = draw(plt, axis = (; limits = ((0, 60), (nothing, 2*360))))
+
+save(joinpath(output, "figure2.png"), fig)
+
+
+function getCI(x; α = 0.05)
+    d = Truncated(Distributions.fit(Normal, x), 0, 1)
+    c1, μ, c2 = quantile(d, [α/2, 0.5, 1 - α/2])
+    (; c1, μ, c2)
+end
+
+df = subset(runs, :light => ByRow(==("remain")))
+df1 = flatten(df, [:l, :straightness])
+subset!(df1, :straightness => ByRow(!isnan), :l => ByRow(<(60)))
+transform!(df1, :l => ByRow(x -> round(Int, x)) => :L)
+df2 = combine(groupby(df1, :L), :straightness => getCI => [:c1, :μ, :c2])
+sort!(df2, :L)
+# subset!(df2, :L => ByRow(x -> 10 ≤ x ≤ 50))
+
+L = copy(df2.L)
+c1 = copy(df2.c1)
+μ = copy(df2.μ)
+c2 = copy(df2.c2)
+
+const K = 11
+
+function findi2(straightness)
+    k = copy(K)
+    for i in k:51
+        if i < length(straightness) && c1[i] < straightness[i] < c2[i]
+            k += 1
+        else
+            return k
+        end
+    end
+    return k
+end
+
+crop(straightness) = straightness[1:findi2(straightness)]
+
+df = subset(runs, :light => ByRow(==("dark")))
+df1 = flatten(df, [:l, :straightness])
+# subset!(df1, :straightness => ByRow(!isnan), :l => ByRow(<(60)))
+transform!(df1, :l => ByRow(x -> round(Int, x)) => :L)
+df2 = combine(groupby(df1, [:run_id, :L]), :straightness => mean => :straightness)
+sort!(df2, [:run_id, :L])
+df3 = combine(groupby(df2, :run_id), :L => Ref => :L, :straightness => Ref => :straightness)
+transform!(df3, :straightness => ByRow(findi2) => :k)
+transform!(df3, [:L, :k] => ByRow((x, i) -> x[K:i]) => :L)
+transform!(df3, [:straightness, :k] => ByRow((x, i) -> x[K:i]) => :straightness)
+subset!(df3, :k => ByRow(>(K + 2)))
+
+fig = Figure()
+ax = Axis(fig[1,1], xlabel = "Path langth (cm)", ylabel = "Straightness", limits = ((10, 50), (0.7, 1)))
+band!(ax, L, c1, c2, color = :black,  alpha = 0.5)
+lines!(ax, L, μ, color = :black)
+for row in eachrow(df3)
+    lines!(ax, row.L, row.straightness, color = :red)
+end
+
+save(joinpath(output, "figure2b.png"), fig)
+
+
+df = subset(runs, :light => ByRow(∈(("dark", "remain"))))
+transform!(groupby(df, :light), eachindex => :group_count)
+subset!(df, :group_count => ByRow(<(41)))
+df1 = flatten(df, [:l, :straightness])
+subset!(df1, :straightness => ByRow(!isnan), :l => ByRow(<(60)))
+transform!(df1, :l => ByRow(x -> round(Int, x)) => :L)
+df2 = combine(groupby(df1, [:light, :L]), :straightness => getCI => [:c1, :μ, :c2])
+
+plt = data(df2) * mapping(:L => "Path length (cm)", :μ, lower = :c1, upper = :c2, color = :light) * visual(LinesFill)
+fig = draw(plt; axis = (; limits = ((0, 50), (0, 1))))
+save(joinpath(output, "marie.png"), fig)
 
 
 ksdjhflhlhlhdsa
+
+
+
+
+
+
+
+
+data(df1) * mapping(:l => "Path length (cm)", :straightness => "Straightness", group = :run_id => nonnumeric, color = :run_id) * visual(Lines) |> draw(; axis = (; limits = ((10, 50), (0, 1))))
+
+
+
+data(df1) * mapping(:l => "Path length (cm)", :straightness => "Straightness", group = :run_id => nonnumeric, color = :run_id) * visual(Lines) |> draw(; axis = (; limits = ((10, 50), (0, 1))))
+
+
+
+
+
+plt = data(df2) * mapping(:L => "Path length (cm)", :μ, lower = :c1, upper = :c2) * visual(LinesFill)
+fig = draw(plt; axis = (; limits = ((10, 50), (0, 1))))
+save(joinpath(output, "figure2a.png"), fig)
+
+df = subset(runs, :light => ByRow(==("dark")))
+
+transform!(df, [:l, :straightness] => ByRow((l, s) -> findfirst
+
+
+
+
+data(df1) * mapping(:l => "Path length (cm)", :straightness => "Straightness", group = :run_id => nonnumeric, color = :run_id) * visual(Lines) |> draw(; axis = (; limits = ((10, 50), (0, 1))))
+
+
+
+
+
+
 
 
 
