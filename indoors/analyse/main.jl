@@ -12,7 +12,7 @@ using QuadGK
 
 GLMakie.activate!()
 
-include("functions.jl")
+include("minimal_functions.jl")
 
 output = "figures"
 mkpath("figures")
@@ -22,6 +22,7 @@ const results_dir = "../track_calibrate/tracks and calibrations"
 runs = CSV.read(joinpath(results_dir, "runs.csv"), DataFrame)
 transform!(runs, :spontaneous_end => ByRow(!ismissing) => :dance_spontaneous)
 transform!(runs, [:light, :dance_induced] => ByRow((l, d) -> string(l, d ? " induced" : "")) => :condition)
+runs.condition .= categorical(runs.condition; levels = ["remain", "dark", "dark induced", "shift", "shift induced"], ordered = true)
 
 calibs = CSV.read(joinpath(results_dir, "calibs.csv"), DataFrame)
 transform!(calibs, :calibration_id => ByRow(get_calibration) => :rectify)
@@ -45,7 +46,68 @@ Threads.@threads for row in eachrow(runs)
     row.l = get_pathlength(row.t, row.spl)
 end
 
+transform!(runs, [:t, :spl] => ByRow(smooth_center) => :xyc)
+transform!(runs, [:t, :spl, :poi_index] => ByRow(smooth_center_poi_rotate) => :xyp)
+transform!(runs, :xyp => ByRow(get_exit_angle) => :θ)
+
+######################## Plots 
+my_renamer = renamer("remain" => "Remain", "dark" => "Dark", "dark induced" => "Dark induced")
+
+df = subset(runs, :light => ByRow(≠("shift")))
+
+######################## Figure 1
+
+df1 = subset(df, :xyc => ByRow(≥(50) ∘ norm ∘ last))
+transform!(df1, :xyc => ByRow(xy -> cropto(xy, 50)) => :xyc)
+transform!(groupby(df1, :condition), eachindex => :n)
+subset!(df1, :n => ByRow(≤(10)))
+@assert all(==(10), combine(groupby(df1, :condition), nrow).nrow)
+
+fig = pregrouped(df1.xyc => first, df1.xyc => last, col = df1.condition => my_renamer) * visual(Lines) |> draw(; figure = (; size = (1200, 400)), axis=(aspect=DataAspect(), ))
+for ax in fig.figure.content 
+    if ax isa Axis
+        for r  in (30, 50)
+            lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
+        end
+    end
+end
+
+save(joinpath(output, "figure1.png"), fig)
+
+
+######################## Figure 2
+
+fig = pregrouped(df.xyp => first => "X (cm)", df.xyp => last => "Y (cm)", col = df.condition => my_renamer) * visual(Lines) |> draw(; figure = (; size = (1200, 300)), axis=(aspect=DataAspect(), limits = (nothing, (-5, nothing))))
+
+save(joinpath(output, "figure2.png"), fig)
+
+combine(groupby(df, :condition), :θ => mean_resultant_vector => :mean_resultant_vector)
+
+
+
+
+
+
+
+
+
+
+
+
 transform!(runs, [:t, :spl, :poi_index] => ByRow(get_center_rotate) => :center_rotate)
+
+
+
+
+
+
+
+
+
+
+
+
+
 # here
 transform!(runs, [:t, :spl] => ByRow(smooth_center) => :center_smooth_xy)
 transform!(runs, [:l, :center_smooth_xy] => ByRow((l, xy) -> norm.(xy) ./ l) => :straightness)
@@ -60,33 +122,6 @@ transform!(runs, [:tθ, :ks] => ByRow((x, p) -> logistic.(x, p[2], p[1], 0)) => 
 transform!(runs, [:t, :spl, :poi_index] => ByRow(get_mean_speed) => :speed)
 
 # runs.danced .= categorical(runs.danced; levels = ["no", "spontaneous", "induced"], ordered = true)
-
-######################## Figure 1
-
-df = subset(runs, :light => ByRow(≠("shift")))
-df.condition .= categorical(df.condition; levels = ["remain", "dark", "dark induced"], ordered = true)
-my_renamer = renamer("remain" => "Remain", "dark" => "Dark", "dark induced" => "Dark induced")
-
-df1 = subset(df, :center_smooth_xy => ByRow(≥(50) ∘ norm ∘ last))
-transform!(df1, :center_smooth_xy => ByRow(xy -> cropto(xy, 50)) => :center_smooth_xy)
-transform!(groupby(df1, :condition), eachindex => :n)
-subset!(df1, :n => ByRow(≤(10)))
-
-
-df2 = flatten(df1, :center_smooth_xy)
-transform!(df2, :center_smooth_xy => [:x, :y])
-plt = data(df2) * mapping(:x => "X (cm)", :y => "Y (cm)", group=:run_id => nonnumeric, col = :condition => my_renamer) * visual(Lines)
-fig = draw(plt; figure = (; size = (1200, 400)), axis=(aspect=DataAspect(), ))
-
-for ax in fig.figure.content 
-    if ax isa Axis
-        for r  in (30, 50)
-            lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
-        end
-    end
-end
-
-save(joinpath(output, "figure1.png"), fig)
 
 
 ######################### Figure 2
