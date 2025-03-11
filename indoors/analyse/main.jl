@@ -20,6 +20,10 @@ mkpath("figures")
 const results_dir = "../track_calibrate/tracks and calibrations"
 
 runs = CSV.read(joinpath(results_dir, "runs.csv"), DataFrame)
+
+rename!(runs, :dance => :induced_dance)
+transform!(runs, :spontaneous_end => ByRow(!ismissing) => :spontaneous_dance)
+
 calibs = CSV.read(joinpath(results_dir, "calibs.csv"), DataFrame)
 transform!(calibs, :calibration_id => ByRow(get_calibration) => :rectify)
 select!(calibs, Cols(:calibration_id, :rectify))
@@ -62,8 +66,7 @@ runs.danced .= categorical(runs.danced; levels = ["no", "spontaneous", "induced"
 ######################## Figure 1
 
 
-df = subset(runs, :light => ByRow(∈(("remain", "dark"))))
-subset!(df, :smooth_xy => ByRow(≥(50) ∘ norm ∘ last))
+df = subset(runs, :smooth_xy => ByRow(≥(50) ∘ norm ∘ last))
 transform!(df, :smooth_xy => ByRow(xy -> cropto(xy, 50)) => :smooth_xy)
 transform!(groupby(df, :light), eachindex => :n)
 subset!(df, :n => ByRow(≤(10)))
@@ -71,7 +74,7 @@ subset!(df, :n => ByRow(≤(10)))
 
 df1 = flatten(df, :smooth_xy)
 transform!(df1, :smooth_xy => [:x, :y])
-plt = data(df1) * mapping(:x => "X (cm)", :y => "Y (cm)", group=:run_id => nonnumeric, col = :light => renamer("remain" => "Remain", "dark" => "Dark")) * visual(Lines)
+plt = data(df1) * mapping(:x => "X (cm)", :y => "Y (cm)", group=:run_id => nonnumeric, col = :light => renamer("remain" => "Remain", "dark" => "Dark", "dance")) * visual(Lines)
 fig = draw(plt; figure = (; size = (800, 400)), axis=(aspect=DataAspect(), ))
 
 for ax in fig.figure.content 
