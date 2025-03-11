@@ -43,7 +43,7 @@ end
 function clean_coords!(xy)
     for i in 2:length(xy)
         Δ = norm(xy[i] - xy[i - 1])
-        if Δ < 1
+        if Δ < 0.1
             xy[i] = xy[i - 1]
         end
     end
@@ -130,12 +130,12 @@ function get_center_rotate(t, spl, poi_index)
     return rot ∘ trans
 end
 
-function plotone(run_id, xy, poi_index, center_rotate, sxy, t, intervention, spontaneous_end)
+function plotone(run_id, xy, poi_index, center_rotate, sxy, t, intervention, spontaneous_end, l, θ, condition)
     fig  = Figure()
-    ax = Axis(fig[1,1], aspect = DataAspect(), autolimitaspect = 1, title = string(run_id), limits = ((-60, 60), (-60, 60)))
-    for r  in (30, 50)
-        lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
-    end
+    ax = Axis(fig[1,1], aspect = DataAspect(), title = string(run_id, " ", condition))
+    # for r  in (30, 50)
+    #     lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
+    # end
     scatter!(ax, center_rotate.(xy[1:poi_index]), markersize = 2)
     scatter!(ax, center_rotate.(xy[poi_index:end]), markersize = 2)
     lines!(ax, sxy[1:poi_index])
@@ -146,6 +146,10 @@ function plotone(run_id, xy, poi_index, center_rotate, sxy, t, intervention, spo
         spontaneous_end_i = findfirst(≥(spontaneous_end), t)
         scatter!(ax, sxy[spontaneous_end_i], label = "spontaneous dance")
     end
+    ax = Axis(fig[2,1], ytickformat = "{:n}°", xlabel = "Path length (cm)", ylabel = "θ")
+    lines!(ax, l, rad2deg.(θ))
+    scatter!(ax, l[poi_index], rad2deg(θ[poi_index]))
+    rowsize!(fig.layout, 1, Relative(9/10))
     return fig
 end
 
