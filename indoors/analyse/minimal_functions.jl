@@ -68,15 +68,14 @@ function get_rotation(p2)
     LinearMap(Angle2d(θ))
 end
 
-function smooth_center_poi_rotate(t, spl, poi_index)
+function get_smooth_center_poi_rotate(t, spl, poi_index)
     f = SV ∘ spl
     p1 = f(t[1])
     p2 = f(t[poi_index])
     trans = Translation(-p2)
     p1 = trans(p1)
     rot = get_rotation(p1)
-    tform = rot ∘ trans ∘ f
-    return tform.(t)
+    return rot ∘ trans ∘ f
 end
 
 function get_exit_angle(xyp, r = 20)

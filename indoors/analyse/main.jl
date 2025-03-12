@@ -1,6 +1,6 @@
 using AlgebraOfGraphics, GLMakie, CairoMakie
 
-using Dates, LinearAlgebra, Statistics
+using Dates, LinearAlgebra, Statistics, Random
 using CSV, DataFrames, CameraCalibrations
 using Interpolations, StaticArrays, Dierckx, CoordinateTransformations, Rotations
 using OhMyThreads
@@ -47,13 +47,17 @@ Threads.@threads for row in eachrow(runs)
 end
 
 transform!(runs, [:t, :spl] => ByRow(smooth_center) => :xyc)
-transform!(runs, [:t, :spl, :poi_index] => ByRow(smooth_center_poi_rotate) => :xyp)
-transform!(runs, :xyp => ByRow(get_exit_angle) => :θ)
+transform!(runs, [:t, :spl, :poi_index] => ByRow(get_smooth_center_poi_rotate) => :tform)
 
 ######################## Plots 
 my_renamer = renamer("remain" => "Remain", "dark" => "Dark", "dark induced" => "Dark induced")
 
 df = subset(runs, :light => ByRow(≠("shift")))
+
+
+transform!(groupby(df, :condition), eachindex => :n)
+combine(groupby(df, :condition), nrow).nrow
+
 
 ######################## Figure 1
 
@@ -77,11 +81,106 @@ save(joinpath(output, "figure1.png"), fig)
 
 ######################## Figure 2
 
-fig = pregrouped(df.xyp => first => "X (cm)", df.xyp => last => "Y (cm)", col = df.condition => my_renamer) * visual(Lines) |> draw(; figure = (; size = (1200, 300)), axis=(aspect=DataAspect(), limits = (nothing, (-5, nothing))))
+df1 = transform(df, [:t, :poi_index, :tform] => ByRow((t, i, f) -> f.(t[i:end])) => :xyp)
+
+fig = pregrouped(df1.xyp => first => "X (cm)", df1.xyp => last => "Y (cm)", col = df1.condition => my_renamer) * visual(Lines) |> draw(; figure = (; size = (1200, 300)), axis=(aspect=DataAspect(), limits = (nothing, (-5, nothing))))
 
 save(joinpath(output, "figure2.png"), fig)
 
-combine(groupby(df, :condition), :θ => mean_resultant_vector => :mean_resultant_vector)
+# function sample_without(df1, nsample)
+#     l = floor(Int, minimum(norm ∘ last, df1.xyp))
+#     select!(df1, Cols(:condition, :xyp))
+#     transform!(groupby(df1, :condition), eachindex => :i)
+#     transform!(df1, :i => ByRow(i -> (i - 1) ÷ nsample + 1) => :group)
+#     transform!(groupby(df1, [:condition, :group]), nrow => :n)
+#     subset!(df1, :n => ByRow(==(nsample)))
+#     select!(df1, Not(:i, :n))
+#     transform!(groupby(df1, :condition), :group => maximum => :n)
+#     transform!(df1, [:group, :n] => ByRow((g, n) -> range(1, l, n)[g]) => :r)
+#     select!(df1, Not(:n))
+#     transform!(df1, [:xyp, :r] => ByRow((xy, r) -> get_exit_angle(xy, r)) => :θ)
+#     df2 = combine(groupby(df1, [:condition, :group]), :θ => mean_resultant_vector => :mean_resultant_vector, :r => first => :r)
+#     select!(df2, Not(:group))
+#     return df2
+# end
+#
+#
+#
+# df1 = transform(df, [:t, :poi_index, :tform] => ByRow((t, i, f) -> f.(t[i:end])) => :xyp);
+# df2 = vcat((sample_without(shuffle(df1), nsample) for nsample in 2:11)...);
+#
+# fig = data(df2) * mapping(:r => "Distance from POI (cm)", :mean_resultant_vector => "Mean resultant vector", color = :condition => my_renamer) * visual(Scatter; markersize = 25) |> draw(; axis = (; title = "After POI", limits = ((0, l+1), (0, 1))))
+#
+#
+#
+#
+#
+#
+# @assert all(==(nsample), combine(groupby(df1, [:condition, :group]), nrow).nrow)
+#
+# combine!(groupby(df1, [:condition, :group]), :xyp => ByRow(xy -> get_exit_angle(xy, r)) => :θ)
+#
+
+
+function sample_mrv(df1, r, n)
+    df2 = shuffle(df1)
+    transform!(groupby(df2, :condition), eachindex => :n)
+    subset!(df2, :n => ByRow(≤(n)))
+    @assert all(==(n), combine(groupby(df2, :condition), nrow).nrow)
+    transform!(df2, :xyp => ByRow(xy -> get_exit_angle(xy, r)) => :θ)
+    dropmissing!(df2, :θ)
+    df3 = combine(groupby(df2, :condition), :θ => mean_resultant_vector => :mean_resultant_vector)
+    @assert nrow(df3) == 3
+    return NamedTuple{Tuple(Symbol.(df3.condition))}(Tuple(df3.mean_resultant_vector))
+end
+
+n = 20
+df1 = transform(df, [:t, :poi_index, :tform] => ByRow((t, i, f) -> f.(t[i:-1:1])) => :xyp)
+
+l = floor(Int, minimum(norm ∘ last, df1.xyp))
+df2 = DataFrame(r = (l - 1)*rand(300) .+ 1)
+transform!(df2, :r => ByRow(r -> sample_mrv(df1, r, n)) => ["remain", "dark", "dark induced"])
+df3 = stack(df2, ["remain", "dark", "dark induced"]; variable_name = :condition, value_name = :mean_resultant_vector)
+fig = data(df3) * mapping(:r => "Distance from POI (cm)", :mean_resultant_vector => "Mean resultant vector", color = :condition => my_renamer) * visual(Scatter) |> draw(; axis = (; title = "Before POI", limits = ((1, l), (0, 1))))
+
+save(joinpath(output, "figure2a.png"), fig)
+
+
+n = 10
+df1 = transform(df, [:t, :poi_index, :tform] => ByRow((t, i, f) -> f.(t[i:end])) => :xyp)
+l = floor(Int, minimum(norm ∘ last, df1.xyp))
+df2 = DataFrame(r = (l - 1)*rand(10) .+ 1)
+transform!(df2, :r => ByRow(r -> sample_mrv(df1, r, n)) => ["remain", "dark", "dark induced"])
+df3 = stack(df2, ["remain", "dark", "dark induced"]; variable_name = :condition, value_name = :mean_resultant_vector)
+fig = data(df3) * mapping(:r => "Distance from POI (cm)", :mean_resultant_vector => "Mean resultant vector", color = :condition => my_renamer) * visual(Scatter) |> draw(; axis = (; title = "Before POI", limits = ((1, l), (0, 1))))
+
+save(joinpath(output, "figure2b.png"), fig)
+
+using BetaRegression
+
+df3.condition .= categorical(df3.condition; levels = ["remain", "dark", "dark induced"], ordered = true)
+
+fm = @formula(mean_resultant_vector ~ condition*r)
+m = BetaRegression.fit(BetaRegressionModel, fm, df3)
+
+n = 100
+newdata = DataFrame(r = repeat(range(1, 30, n), outer = 3), mean_resultant_vector = zeros(3n), condition = repeat(["remain", "dark", "dark induced"], inner = n))
+newdata.mean_resultant_vector .= predict(m, newdata)
+
+data(newdata) * mapping(:r, :mean_resultant_vector, color = :condition => my_renamer) * visual(Lines) |> draw()
+
+
+
+# select!(newdata, Not(:mean_resultant_vector))
+# newdata = hcat(newdata, res)
+# rename!(newdata, :prediction => :mean_resultant_vector)
+
+data(newdata) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, color = :condition) * visual(LinesFill) |> draw()
+
+
+n = 10000
+df = DataFrame(x = 1:n, y = rand(Beta(), n))
+scatter(df.x, df.y)
 
 
 
@@ -91,6 +190,8 @@ combine(groupby(df, :condition), :θ => mean_resultant_vector => :mean_resultant
 
 
 
+
+lsdjkfhlsdjfhlsdfjhlasdfhslf
 
 
 
