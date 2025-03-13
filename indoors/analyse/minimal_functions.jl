@@ -78,12 +78,13 @@ function get_smooth_center_poi_rotate(t, spl, poi_index)
     return rot ∘ trans ∘ f
 end
 
-function get_exit_angle(xyp, r = 20)
+function get_exit_angle(xyp, r)
     i = findfirst(≥(r) ∘ norm, xyp)
     if isnothing(i)
         return missing
     end
-    atan(reverse(xyp[i])...)
+    x, y = xyp[i]
+    atan(y, x)
 end
 
 function mean_resultant_vector(θ)

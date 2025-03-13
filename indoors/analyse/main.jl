@@ -1,5 +1,7 @@
 using AlgebraOfGraphics, GLMakie, CairoMakie
 
+using HypothesisTests
+
 using Dates, LinearAlgebra, Statistics, Random
 using CSV, DataFrames, CameraCalibrations
 using Interpolations, StaticArrays, Dierckx, CoordinateTransformations, Rotations
@@ -121,66 +123,46 @@ save(joinpath(output, "figure2.png"), fig)
 # combine!(groupby(df1, [:condition, :group]), :xyp => ByRow(xy -> get_exit_angle(xy, r)) => :θ)
 #
 
+df1 = transform(df, [:t, :poi_index, :tform] => ByRow((t, i, f) -> f.(t[i:end])) => :xyp)
+select!(df1, Cols(:condition, :xyp))
 
-function sample_mrv(df1, r, n)
-    df2 = shuffle(df1)
-    transform!(groupby(df2, :condition), eachindex => :n)
-    subset!(df2, :n => ByRow(≤(n)))
-    @assert all(==(n), combine(groupby(df2, :condition), nrow).nrow)
-    transform!(df2, :xyp => ByRow(xy -> get_exit_angle(xy, r)) => :θ)
-    dropmissing!(df2, :θ)
-    df3 = combine(groupby(df2, :condition), :θ => mean_resultant_vector => :mean_resultant_vector)
-    @assert nrow(df3) == 3
-    return NamedTuple{Tuple(Symbol.(df3.condition))}(Tuple(df3.mean_resultant_vector))
+α = 0.05
+n = 10_000
+nsamples = 50
+nr = 25
+fm = @formula(mean_resultant_vector ~ r)
+l = floor(Int, minimum(norm ∘ last, df1.xyp))
+
+
+function sample_mrvl(xyp)
+    df = DataFrame(r = range(1, l, nr))
+    transform!(df, :r => ByRow(r -> mean_resultant_vector((get_exit_angle(xy, r) for xy in sample(xyp, nsamples; replace = true)))) => :mean_resultant_vector)
+    m = BetaRegression.fit(BetaRegressionModel, fm, df)
+    return coef(m)
 end
 
-n = 20
-df1 = transform(df, [:t, :poi_index, :tform] => ByRow((t, i, f) -> f.(t[i:-1:1])) => :xyp)
+function bootstrap(xyp)
+    ba = [zeros(2) for _ in 1:n]
+    Threads.@threads for i in 1:n
+        ba[i] = sample_mrvl(xyp)
+    end
+    μb, μa = mean(ba)
+    σb, σa = std(ba)
+    cia1, cia2 = μa .+ 1.96σa .* [-1, 1]
+    cib1, cib2 = μb .+ 1.96σb .* [-1, 1]
 
-l = floor(Int, minimum(norm ∘ last, df1.xyp))
-df2 = DataFrame(r = (l - 1)*rand(300) .+ 1)
-transform!(df2, :r => ByRow(r -> sample_mrv(df1, r, n)) => ["remain", "dark", "dark induced"])
-df3 = stack(df2, ["remain", "dark", "dark induced"]; variable_name = :condition, value_name = :mean_resultant_vector)
-fig = data(df3) * mapping(:r => "Distance from POI (cm)", :mean_resultant_vector => "Mean resultant vector", color = :condition => my_renamer) * visual(Scatter) |> draw(; axis = (; title = "Before POI", limits = ((1, l), (0, 1))))
+    r = range(0, l, 100)
+    ci1 = BetaRegression.linkinv.(LogitLink(), cia1 .* r .+ cib1)
+    μ = BetaRegression.linkinv.(LogitLink(), μa .* r .+ μb)
+    ci2 = BetaRegression.linkinv.(LogitLink(), cia2 .* r .+ cib2)
 
-save(joinpath(output, "figure2a.png"), fig)
+    return (; r, ci1, μ, ci2)
+end
 
-
-n = 10
-df1 = transform(df, [:t, :poi_index, :tform] => ByRow((t, i, f) -> f.(t[i:end])) => :xyp)
-l = floor(Int, minimum(norm ∘ last, df1.xyp))
-df2 = DataFrame(r = (l - 1)*rand(10) .+ 1)
-transform!(df2, :r => ByRow(r -> sample_mrv(df1, r, n)) => ["remain", "dark", "dark induced"])
-df3 = stack(df2, ["remain", "dark", "dark induced"]; variable_name = :condition, value_name = :mean_resultant_vector)
-df3.condition .= categorical(df3.condition; levels = ["remain", "dark", "dark induced"], ordered = true)
-fig = data(df3) * mapping(:r => "Distance from POI (cm)", :mean_resultant_vector => "Mean resultant vector", color = :condition => my_renamer) * visual(Scatter) |> draw(; axis = (; title = "Before POI", limits = ((1, l), (0, 1))))
-
-save(joinpath(output, "figure2b.png"), fig)
-
-using BetaRegression
+df2 = combine(groupby(df1, :condition), :xyp => bootstrap => [:r, :ci1, :μ, :ci2])
 
 
-fm = @formula(mean_resultant_vector ~ condition*r)
-m = BetaRegression.fit(BetaRegressionModel, fm, df3)
-
-n = 100
-newdata = DataFrame(r = repeat(range(1, 30, n), outer = 3), mean_resultant_vector = zeros(3n), condition = repeat(["remain", "dark", "dark induced"], inner = n))
-newdata.mean_resultant_vector .= predict(m, newdata)
-
-data(newdata) * mapping(:r, :mean_resultant_vector, color = :condition => my_renamer) * visual(Lines) |> draw()
-
-
-
-# select!(newdata, Not(:mean_resultant_vector))
-# newdata = hcat(newdata, res)
-# rename!(newdata, :prediction => :mean_resultant_vector)
-
-data(newdata) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, color = :condition) * visual(LinesFill) |> draw()
-
-
-n = 10000
-df = DataFrame(x = 1:n, y = rand(Beta(), n))
-scatter(df.x, df.y)
+data(df2) * mapping(:r, :μ, lower = :ci1, upper = :ci2, color = :condition) * visual(LinesFill) |> draw()
 
 
 
@@ -188,6 +170,36 @@ scatter(df.x, df.y)
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+d = Normal(1,2)
+h = rand(d, 1000)
+sample_sizes = round.(Int, range(5, 10_000, 5))
+σ = map(sample_sizes) do sample_size
+    μs = [mean(sample(h, sample_size)) for _ in 1:10_000]
+    σs = [std(sample(h, sample_size)) for _ in 1:10_000]
+    (σ1 = std(μs), σ2 = mean(σs))
+end
+
+lines(sample_sizes, σ, axis = (;yscale = log, xscale = log))
+
+m = [mean(sample(h, 1000)) for _ in 1:10_000]
+var(m)
 
 
 
