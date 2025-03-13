@@ -152,13 +152,13 @@ l = floor(Int, minimum(norm ∘ last, df1.xyp))
 df2 = DataFrame(r = (l - 1)*rand(10) .+ 1)
 transform!(df2, :r => ByRow(r -> sample_mrv(df1, r, n)) => ["remain", "dark", "dark induced"])
 df3 = stack(df2, ["remain", "dark", "dark induced"]; variable_name = :condition, value_name = :mean_resultant_vector)
+df3.condition .= categorical(df3.condition; levels = ["remain", "dark", "dark induced"], ordered = true)
 fig = data(df3) * mapping(:r => "Distance from POI (cm)", :mean_resultant_vector => "Mean resultant vector", color = :condition => my_renamer) * visual(Scatter) |> draw(; axis = (; title = "Before POI", limits = ((1, l), (0, 1))))
 
 save(joinpath(output, "figure2b.png"), fig)
 
 using BetaRegression
 
-df3.condition .= categorical(df3.condition; levels = ["remain", "dark", "dark induced"], ordered = true)
 
 fm = @formula(mean_resultant_vector ~ condition*r)
 m = BetaRegression.fit(BetaRegressionModel, fm, df3)
