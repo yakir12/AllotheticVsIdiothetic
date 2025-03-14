@@ -11,6 +11,7 @@ using CategoricalArrays
 using Distributions
 using IntervalSets
 using QuadGK
+using BetaRegression
 
 GLMakie.activate!()
 
@@ -124,27 +125,34 @@ save(joinpath(output, "figure2.png"), fig)
 #
 
 df1 = transform(df, [:t, :poi_index, :tform] => ByRow((t, i, f) -> f.(t[i:end])) => :xyp)
-select!(df1, Cols(:condition, :xyp))
+nr = 25
+l = floor(Int, minimum(norm ∘ last, df1.xyp))
+r = range(1, l, nr)
+transform!(df1, :xyp => ByRow(xyp -> get_exit_angle.(Ref(xyp), r)) => :θs)
+select!(df1, Cols(:condition, :θs))
+df1.r .= Ref(r)
+df2 = flatten(df1, [:θs, :r])
+
+sort(combine(groupby(df2, [:condition, :r]), :θs => Ref => :θs), [:condition, :r])
+
 
 α = 0.05
 n = 10_000
 nsamples = 50
-nr = 25
 fm = @formula(mean_resultant_vector ~ r)
-l = floor(Int, minimum(norm ∘ last, df1.xyp))
 
 
-function sample_mrvl(xyp)
-    df = DataFrame(r = range(1, l, nr))
-    transform!(df, :r => ByRow(r -> mean_resultant_vector((get_exit_angle(xy, r) for xy in sample(xyp, nsamples; replace = true)))) => :mean_resultant_vector)
+function sample_mrvl(θs)
+    y = mean_resultant_vector.(eachrow(stack(sample(θs, nsamples))))
+    df = DataFrame(r = r, mean_resultant_vector = y)
     m = BetaRegression.fit(BetaRegressionModel, fm, df)
     return coef(m)
 end
 
-function bootstrap(xyp)
+function bootstrap(θs)
     ba = [zeros(2) for _ in 1:n]
     Threads.@threads for i in 1:n
-        ba[i] = sample_mrvl(xyp)
+        ba[i] = sample_mrvl(θs)
     end
     μb, μa = mean(ba)
     σb, σa = std(ba)
@@ -159,7 +167,7 @@ function bootstrap(xyp)
     return (; r, ci1, μ, ci2)
 end
 
-df2 = combine(groupby(df1, :condition), :xyp => bootstrap => [:r, :ci1, :μ, :ci2])
+df2 = combine(groupby(df1, :condition), :θs => bootstrap => [:r, :ci1, :μ, :ci2])
 
 
 data(df2) * mapping(:r, :μ, lower = :ci1, upper = :ci2, color = :condition) * visual(LinesFill) |> draw()
@@ -185,6 +193,7 @@ data(df2) * mapping(:r, :μ, lower = :ci1, upper = :ci2, color = :condition) * v
 
 
 
+lsdjkfhlsdjfhlsdfjhlasdfhslf
 
 
 d = Normal(1,2)
@@ -203,7 +212,6 @@ var(m)
 
 
 
-lsdjkfhlsdjfhlsdfjhlasdfhslf
 
 
 
