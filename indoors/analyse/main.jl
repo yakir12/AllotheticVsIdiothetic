@@ -125,13 +125,90 @@ save(joinpath(output, "figure2.png"), fig)
 #
 
 df1 = transform(df, [:t, :poi_index, :tform] => ByRow((t, i, f) -> f.(t[i:end])) => :xyp)
-nr = 25
+nr = 10
 l = floor(Int, minimum(norm ∘ last, df1.xyp))
 r = range(1, l, nr)
 transform!(df1, :xyp => ByRow(xyp -> get_exit_angle.(Ref(xyp), r)) => :θs)
 select!(df1, Cols(:condition, :θs))
 df1.r .= Ref(r)
 df2 = flatten(df1, [:θs, :r])
+df3 = combine(groupby(df2, [:condition, :r]), :θs => mean_resultant_vector => :mean_resultant_vector)
+df3.condition .= categorical(df3.condition; levels = ["remain", "dark", "dark induced"], ordered = true)
+
+data(df3) * mapping(:r, :mean_resultant_vector, color = :condition => my_renamer) * visual(Lines) |> draw
+
+
+CSV.write("data.csv", df3)
+
+df4 = CSV.read("fitted mean_resultant_vector.csv", DataFrame)
+
+data(df4) * mapping(:r, Symbol("q_0.5"), lower = Symbol("q_0.025"), upper = Symbol("q_0.975"), color = :condition => my_renamer) * visual(LinesFill) |> draw
+
+fig = Figure()
+ax = Axis(fig[1,1])
+band!(ax, df4, lower, upper, alpha = 0.3)
+
+
+rl = range(extrema(df3.r)..., 100)
+newdf = DataFrame(r = repeat(rl, outer = 3), condition = repeat(levels(df3.condition), inner = 100), mean_resultant_vector = zeros(300))
+fm = @formula(mean_resultant_vector ~ r*condition)
+function bootstrap(df)
+    # for i in 1:3
+    try
+        m = BetaRegression.fit(BetaRegressionModel, fm, df[sample(1:nrow(df), nrow(df)), :])
+        predict(m, newdf)
+    catch
+        missings(nrow(newdf))
+    end
+    # end
+end
+c = stack(bootstrap(df3) for _ in 1:10_000)
+y = quantile.(skipmissing.(eachrow(c)), Ref([0.025, 0.5, 0.975]))
+newdf.lower .= getindex.(y, 1)
+newdf.mean_resultant_vector .= getindex.(y, 2)
+newdf.upper .= getindex.(y, 3)
+
+data(newdf) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, color = :condition => my_renamer) * visual(LinesFill) |> draw
+
+
+
+
+
+fig = Figure()
+ax = Axis(fig[1,1])
+for l in c
+    lines!(ax, rl, l[1:100])
+end
+
+
+
+
+fm = @formula(mean_resultant_vector ~ r*condition)
+m = BetaRegression.fit(BetaRegressionModel, fm, df3)
+
+rl = range(extrema(df3.r)..., 100)
+newdf = DataFrame(r = repeat(rl, outer = 3), condition = repeat(levels(df3.condition), inner = 100), mean_resultant_vector = zeros(300))
+newdf.mean_resultant_vector = predict(m, newdf)
+
+data(newdf) * mapping(:r, :mean_resultant_vector, color = :condition => my_renamer) * visual(Lines) |> draw
+
+
+
+
+
+
+
+b, a... = coef(m)
+
+yl = BetaRegression.linkinv.(LogitLink(), b .+ a[1] .* xl)
+ci = confint(m)
+cib1, cib2 = ci[1, :]
+cia1, cia2 = ci[2, :]
+lower = BetaRegression.linkinv.(LogitLink(), cia1 .* xl .+ cib1)
+upper = BetaRegression.linkinv.(LogitLink(), cia2 .* xl .+ cib2)
+
+
+
 
 sort(combine(groupby(df2, [:condition, :r]), :θs => Ref => :θs), [:condition, :r])
 
@@ -184,6 +261,15 @@ data(df2) * mapping(:r, :μ, lower = :ci1, upper = :ci2, color = :condition) * v
 
 
 
+
+
+newdf = DataFrame(x = xl, y = zeros(length(xl)))
+newdf.y = predict(m, newdf)
+disallowmissing!(newdf)
+scatter(x, y)
+band!(xl, lower, upper, alpha = 0.3)
+lines!(xl, y2)
+lines!(xl, newdf.y)
 
 
 
