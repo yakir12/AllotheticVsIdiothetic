@@ -152,7 +152,17 @@ end
 function bootstrap(θs)
     ba = [zeros(2) for _ in 1:n]
     Threads.@threads for i in 1:n
-        ba[i] = sample_mrvl(θs)
+        for j in 1:3
+            try
+                ba[i] = sample_mrvl(θs)
+                break
+            catch ex
+                @warn "failed to converge"
+                if j == 3
+                    @error "failed 3 times"
+                end
+            end
+        end
     end
     μb, μa = mean(ba)
     σb, σa = std(ba)
@@ -196,13 +206,11 @@ data(df2) * mapping(:r, :μ, lower = :ci1, upper = :ci2, color = :condition) * v
 lsdjkfhlsdjfhlsdfjhlasdfhslf
 
 
-d = Normal(1,2)
-h = rand(d, 1000)
-sample_sizes = round.(Int, range(5, 10_000, 5))
+d = Normal(1,3)
+h = rand(d, 1_000_000)
+sample_sizes = [10, 100, 1000, 10_000]
 σ = map(sample_sizes) do sample_size
-    μs = [mean(sample(h, sample_size)) for _ in 1:10_000]
-    σs = [std(sample(h, sample_size)) for _ in 1:10_000]
-    (σ1 = std(μs), σ2 = mean(σs))
+    mean((std(sample(h, sample_size)) for _ in 1:10_000))
 end
 
 lines(sample_sizes, σ, axis = (;yscale = log, xscale = log))
