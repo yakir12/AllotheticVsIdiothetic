@@ -127,20 +127,41 @@ save(joinpath(output, "figure2.png"), fig)
 df1 = transform(df, [:t, :poi_index, :tform] => ByRow((t, i, f) -> f.(t[i:end])) => :xyp)
 nr = 3
 l = floor(Int, minimum(norm ∘ last, df1.xyp))
-r = range(1, l, nr)
+r = range(1e-3, l, nr)
 transform!(df1, :xyp => ByRow(xyp -> get_exit_angle.(Ref(xyp), r)) => :θs)
 select!(df1, Cols(:condition, :θs))
 df1.r .= Ref(r)
 
+rl = range(extrema(r)..., 100)
+newdf = DataFrame(r = repeat(rl, outer = 3), condition = repeat(["remain", "dark", "dark induced"], inner = 100), mean_resultant_vector = zeros(300))
 fm = @formula(mean_resultant_vector ~ r*condition)
 function bootstrap(df)
     n = nrow(df)
     df1 = flatten(df[sample(1:n, n), :], [:θs, :r])
     df2 = combine(groupby(df1, [:condition, :r]), :θs => mean_resultant_vector => :mean_resultant_vector)
     m = BetaRegression.fit(BetaRegressionModel, fm, df2)
-    predict(m)
+    predict(m, newdf)
+end
+c = stack(bootstrap(df1) for _ in 1:10_000)
+y = quantile.(skipmissing.(eachrow(c)), Ref([0.025, 0.5, 0.975]))
+newdf.lower .= getindex.(y, 1)
+newdf.mean_resultant_vector .= getindex.(y, 2)
+newdf.upper .= getindex.(y, 3)
 
-    newdf = DataFrame(r = repeat(
+data(newdf) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, color = :condition => my_renamer => "Light") * visual(LinesFill) |> draw(; axis = (; ylabel = "Mean resultant length", xlabel = "Radius (cm)", limits = ((0, l), (0, 1))))
+
+sdjfdshflsjhfshdflhdlshflkdsa
+
+
+
+
+
+
+
+
+
+
+
 
 df2 = flatten(df1, [:θs, :r])
 df3 = combine(groupby(df2, [:condition, :r]), :θs => mean_resultant_vector => :mean_resultant_vector)
