@@ -125,12 +125,23 @@ save(joinpath(output, "figure2.png"), fig)
 #
 
 df1 = transform(df, [:t, :poi_index, :tform] => ByRow((t, i, f) -> f.(t[i:end])) => :xyp)
-nr = 25
+nr = 3
 l = floor(Int, minimum(norm ∘ last, df1.xyp))
 r = range(1, l, nr)
 transform!(df1, :xyp => ByRow(xyp -> get_exit_angle.(Ref(xyp), r)) => :θs)
 select!(df1, Cols(:condition, :θs))
 df1.r .= Ref(r)
+
+fm = @formula(mean_resultant_vector ~ r*condition)
+function bootstrap(df)
+    n = nrow(df)
+    df1 = flatten(df[sample(1:n, n), :], [:θs, :r])
+    df2 = combine(groupby(df1, [:condition, :r]), :θs => mean_resultant_vector => :mean_resultant_vector)
+    m = BetaRegression.fit(BetaRegressionModel, fm, df2)
+    predict(m)
+
+    newdf = DataFrame(r = repeat(
+
 df2 = flatten(df1, [:θs, :r])
 
 sort(combine(groupby(df2, [:condition, :r]), :θs => Ref => :θs), [:condition, :r])
