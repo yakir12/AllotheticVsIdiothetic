@@ -70,7 +70,7 @@ transform!(groupby(df1, :condition), eachindex => :n)
 subset!(df1, :n => ByRow(≤(10)))
 @assert all(==(10), combine(groupby(df1, :condition), nrow).nrow)
 
-fig = pregrouped(df1.xyc => first, df1.xyc => last, col = df1.condition => my_renamer) * visual(Lines) |> draw(; figure = (; size = (1200, 400)), axis=(aspect=DataAspect(), ))
+fig = pregrouped(df1.xyc => first, df1.xyc => last, col = df1.condition => my_renamer, row = df1.at_run => nonnumeric) * visual(Lines) |> draw(; figure = (; size = (1200, 400)), axis=(aspect=DataAspect(), ))
 for ax in fig.figure.content 
     if ax isa Axis
         for r  in (30, 50)
@@ -86,7 +86,7 @@ save(joinpath(output, "figure1.png"), fig)
 
 df1 = transform(df, [:t, :poi_index, :tform] => ByRow((t, i, f) -> f.(t[i:end])) => :xyp)
 
-fig = pregrouped(df1.xyp => first => "X (cm)", df1.xyp => last => "Y (cm)", col = df1.condition => my_renamer) * visual(Lines) |> draw(; figure = (; size = (1200, 300)), axis=(aspect=DataAspect(), limits = (nothing, (-5, nothing))))
+fig = pregrouped(df1.xyp => first => "X (cm)", df1.xyp => last => "Y (cm)", col = df1.condition => my_renamer, row = df1.at_run => nonnumeric) * visual(Lines) |> draw(; figure = (; size = (1200, 300)), axis=(aspect=DataAspect(), limits = (nothing, (-5, nothing))))
 
 save(joinpath(output, "figure2.png"), fig)
 
@@ -148,7 +148,9 @@ newdf.lower .= getindex.(y, 1)
 newdf.mean_resultant_vector .= getindex.(y, 2)
 newdf.upper .= getindex.(y, 3)
 
-data(newdf) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, color = :condition => my_renamer => "Light") * visual(LinesFill) |> draw(; axis = (; ylabel = "Mean resultant length", xlabel = "Radius (cm)", limits = ((0, l), (0, 1))))
+fig = data(newdf) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, color = :condition => my_renamer => "Light") * visual(LinesFill) |> draw(; axis = (; ylabel = "Mean resultant length", xlabel = "Radius (cm)", limits = ((0, l), (0, 1))))
+
+save(joinpath(output, "figure3.png"), fig)
 
 sdjfdshflsjhfshdflhdlshflkdsa
 
