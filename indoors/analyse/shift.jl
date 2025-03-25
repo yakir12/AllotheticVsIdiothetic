@@ -88,26 +88,29 @@ transform!(df1, :tij_file => ByRow(get_ij) => :ij)
 
 fig = pregrouped(df1.ij => first, df1.ij => last) * visual(ScatterLines) |> draw(; axis = (; aspect = DataAspect()))
 
-using StatsBase
+using StatsBase, Graphs
 
 vs = copy(df1.ij[1])
-
-ids = StatsBase.levelsmap(vs)
-vs2 = [ids[k] for k in vs]
-n = length(vs)
-g = DiGraph(n)
-for (v1, v2) in zip(vs2[1:end-1], vs2[2:end])
-    add_edge!(g, v1, v2)
+function remove_cycles!(ij)
+    ids = StatsBase.levelsmap(ij)
+    vs = [ids[k] for k in ij]
+    n = length(vs)
+    g = DiGraph(n)
+    for (v1, v2) in zip(vs[1:end-1], vs[2:end])
+        add_edge!(g, v1, v2)
+    end
+    c = simplecycles(g)
+    tokill = sort(unique(reduce(vcat, c)))
+    deleteat!(ij, tokill)
+    return ij
 end
-c = simplecycles(g)
-tokill = sort(unique(reduce(vcat, c)))
-# tokill = findall(<(50) ∘ length, c)
-deleteat!(vs, tokill)
+
+remove_cycles!(vs)
 
 lines(SV.(vs), axis = (; aspect = DataAspect()))
-# lines!(SV.(df1.ij[1]))
+lines!(SV.(df1.ij[1]))
 
-graphplot(g)
+dsjhflskdhfkdshflskhf
 
 
 using Graphs
