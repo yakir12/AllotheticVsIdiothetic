@@ -27,21 +27,23 @@ end
 #     return xy
 # end
 
-function prune_coords!(t, xy)
-    rmax = 10 # cm
-    rmin = 1 # cm
-    for i in 1:length(xy) - 1
-        j = copy(i + 1)
-        while norm(xy[j] - xy[i]) < rmax
-            j += 1
 
 
-
-    Δ = round(Int, 1/step(t)) # Δ steps for 1 second
-    xy = xy[1:Δ:end]
-    t = range(t[1], t[end], length(xy))
-    return (; t, xy)
-end
+# function prune_coords!(t, xy)
+#     rmax = 10 # cm
+#     rmin = 1 # cm
+#     for i in 1:length(xy) - 1
+#         j = copy(i + 1)
+#         while norm(xy[j] - xy[i]) < rmax
+#             j += 1
+#
+#
+#
+#     Δ = round(Int, 1/step(t)) # Δ steps for 1 second
+#     xy = xy[1:Δ:end]
+#     t = range(t[1], t[end], length(xy))
+#     return (; t, xy)
+# end
 
 impute_poi_time(_, _, poi::Float64) = poi
 function impute_poi_time(t, xy, ::Missing)

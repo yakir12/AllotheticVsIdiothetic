@@ -45,7 +45,7 @@ transform!(runs, [:spontaneous_end, :intervention] => ByRow(coalesce) => :poi)
 
 transform!(runs, [:tij_file, :rectify] => ByRow(get_txy) => [:t, :xy])
 # transform!(runs, :xy => ByRow(clean_coords!) => :xy)
-transform!(runs, [:t, :xy] => ByRow(prune_coords!) => [:t, :xy])
+# transform!(runs, [:t, :xy] => ByRow(prune_coords!) => [:t, :xy])
 transform!(runs, [:t, :xy, :poi] => ByRow(impute_poi_time) => :poi)
 disallowmissing!(runs, :poi)
 transform!(runs, [:xy, :t, :poi] => ByRow(glue_poi_index!) => [:poi_index, :dance_jump])
@@ -76,6 +76,53 @@ pregrouped(df.tθ, df.θ => rad2deg, row = df.dance_induced, col = df.at_run => 
 pregrouped(df.tθ, df.θ => rad2deg, layout = string.(df.run_id, " ", df.condition)) * visual(Lines) |> draw()
 
 fig
+
+function get_ij(file)
+    tij = CSV.File(joinpath(results_dir, file))
+    tuple.(tij.i, tij.j)
+end
+
+
+df1 = subset(df, :run_id => ByRow(==(8)))
+transform!(df1, :tij_file => ByRow(get_ij) => :ij)
+
+fig = pregrouped(df1.ij => first, df1.ij => last) * visual(ScatterLines) |> draw(; axis = (; aspect = DataAspect()))
+
+using StatsBase
+
+vs = copy(df1.ij[1])
+
+ids = StatsBase.levelsmap(vs)
+vs2 = [ids[k] for k in vs]
+n = length(vs)
+g = DiGraph(n)
+for (v1, v2) in zip(vs2[1:end-1], vs2[2:end])
+    add_edge!(g, v1, v2)
+end
+c = simplecycles(g)
+tokill = sort(unique(reduce(vcat, c)))
+# tokill = findall(<(50) ∘ length, c)
+deleteat!(vs, tokill)
+
+lines(SV.(vs), axis = (; aspect = DataAspect()))
+# lines!(SV.(df1.ij[1]))
+
+graphplot(g)
+
+
+using Graphs
+
+g = path_graph(60)
+
+g = path_digraph(60)
+graphplot(g)
+
+using GLMakie, GraphMakie
+using GraphMakie.NetworkLayout
+g = smallgraph(:dodecahedral)
+graphplot(g; layout=Stress(; dim=3))
+
+
 
 ujfhsdfhjsdkh
 
