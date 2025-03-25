@@ -77,6 +77,44 @@ pregrouped(df.tθ, df.θ => rad2deg, layout = string.(df.run_id, " ", df.conditi
 
 fig
 
+vs = [(0,0), (1,0), (2,0), (3,1), (3,2), (1,2), (1,1), (2,0), (3,0), (4,0)]
+xy = Point2f.(vs)
+fig = Figure()
+ax = Axis(fig[1,1], aspect = DataAspect())
+scatterlines!(ax, xy)
+
+function remove_cycles!(ij)
+    ids = StatsBase.levelsmap(ij)
+    vs = [ids[k] for k in ij]
+    n = length(vs)
+    g = DiGraph(n)
+    for (v1, v2) in zip(vs[1:end-1], vs[2:end])
+        add_edge!(g, v1, v2)
+    end
+    c = simplecycles(g)
+    tokill = sort(unique(reduce(vcat, c)))
+    deleteat!(ij, tokill)
+    return ij
+end
+
+remove_cycles!(vs)
+
+
+function spiral()
+    n = 100
+    θs = range(0, 3π, n)
+    as = range(-10, 10, n).^2
+    ij = Vector{NTuple{2, Int}}(undef, n)
+    for (i, θ) in enumerate(θs)
+        ij[i] = round.(Int, as[i] .* θ .* reverse(sincos(θ)))
+    end
+    return [i .- ij[1] for i in ij]
+end
+xy = spiral()
+lines(SV.(xy), axis = (; aspect = DataAspect()))
+
+
+
 function get_ij(file)
     tij = CSV.File(joinpath(results_dir, file))
     tuple.(tij.i, tij.j)
