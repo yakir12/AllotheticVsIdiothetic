@@ -2,6 +2,7 @@ using AlgebraOfGraphics, GLMakie, CairoMakie
 
 using HypothesisTests
 
+using StatsBase, Graphs
 using Dates, LinearAlgebra, Statistics, Random
 using CSV, DataFrames, CameraCalibrations
 using Interpolations, StaticArrays, Dierckx, CoordinateTransformations, Rotations
@@ -43,8 +44,9 @@ rename!(runs, :poi => :intervention)
 transform!(runs, :spontaneous_end => ByRow(passmissing(tosecond)), renamecols = false)
 transform!(runs, [:spontaneous_end, :intervention] => ByRow(coalesce) => :poi)
 
-transform!(runs, [:tij_file, :rectify] => ByRow(get_txy) => [:t, :xy])
-# transform!(runs, :xy => ByRow(clean_coords!) => :xy)
+transform!(runs, :tij_file => ByRow(get_tij) => [:t, :ij])
+# transform!(runs, [:t, :ij] => ByRow(clean_coords) => [:t, :ij])
+transform!(runs, [:ij, :rectify] => ByRow((ij, fun) -> fun.(ij)) => :xy)
 # transform!(runs, [:t, :xy] => ByRow(prune_coords!) => [:t, :xy])
 transform!(runs, [:t, :xy, :poi] => ByRow(impute_poi_time) => :poi)
 disallowmissing!(runs, :poi)
@@ -69,7 +71,12 @@ my_renamer = uppercasefirst ∘ string
 
 
 df1 = subset(df, :run_id => ByRow(==(8)))
-fig = (pregrouped(df1.xyc => first, df1.xyc => last) + pregrouped(df1.xy => first, df1.xy => last)) * visual(Lines) |> draw(; axis = (; aspect = DataAspect()))
+
+fig = pregrouped(df1.xyc => first, df1.xyc => last) * visual(Lines) |> draw(; axis = (; aspect = DataAspect()))
+display(fig)
+
+sdjkhfgksdljfhsfhj
+# fig = (pregrouped(df1.xyc => first, df1.xyc => last) + pregrouped(df1.xy => first, df1.xy => last)) * visual(Lines) |> draw(; axis = (; aspect = DataAspect()))
 
 pregrouped(df.tθ, df.θ => rad2deg, row = df.dance_induced, col = df.at_run => nonnumeric) * visual(Lines) |> draw()
 
@@ -77,58 +84,94 @@ pregrouped(df.tθ, df.θ => rad2deg, layout = string.(df.run_id, " ", df.conditi
 
 fig
 
-vs = [(0,0), (1,0), (2,0), (3,1), (3,2), (1,2), (1,1), (2,0), (3,0), (4,0)]
-xy = Point2f.(vs)
-fig = Figure()
-ax = Axis(fig[1,1], aspect = DataAspect())
-scatterlines!(ax, xy)
 
-function remove_cycles!(ij)
-    ids = StatsBase.levelsmap(ij)
-    vs = [ids[k] for k in ij]
-    n = length(vs)
-    g = DiGraph(n)
-    for (v1, v2) in zip(vs[1:end-1], vs[2:end])
-        add_edge!(g, v1, v2)
-    end
-    c = simplecycles(g)
-    tokill = sort(unique(reduce(vcat, c)))
-    deleteat!(ij, tokill)
-    return ij
+
+t = df1.t[1]
+spl = df1.spl[1]
+t1 = 30:0.04:40
+xy = SV.(spl.(t1))
+lines(xy)
+scatter!(SV(spl(31.31)))
+scatter!(SV(spl(39.52)))
+
+f = Figure()
+ax1 = Axis(f[1, 1], yticklabelcolor = :blue, ylabel = "x")
+ax2 = Axis(f[1, 1], yticklabelcolor = :red, yaxisposition = :right, ylabel = "y")
+hidespines!(ax2)
+hidexdecorations!(ax2)
+lines!(ax1, t1, first.(xy), color = :blue)
+lines!(ax2, t1, last.(xy), color = :red)
+vlines!(ax2, [31.31, 39.52])
+
+
+function arclength(spl, t1, t2; kws...)
+    knots = get_knots(spl)
+    filter!(t -> t1 < t < t2, knots)
+    pushfirst!(knots, t1)
+    push!(knots, t2)
+    s, _ = quadgk(t -> norm(derivative(spl, t)), knots; kws...)
+    return s
 end
+xy = SV.(spl.(t))
 
-remove_cycles!(vs)
+sdjkhfgksdljfhsfhj
 
+# ij = [(0,0), (1,0), (2,0), (3,1), (3,2), (1,2), (1,1), (2,0), (3,0), (4,0)]
+# remove_cycles!(ij)
+#
+# ids = levelsmap(ij)
+# vs = [ids[k] for k in ij]
+# g = DiGraph(length(vs))
+# for (v1, v2) in zip(vs[1:end-1], vs[2:end])
+#     add_edge!(g, v1, v2)
+# end
+# c = only(simplecycles(g))
+#
+# xy = Point2f.(ij)
+# fig = Figure()
+# ax = Axis(fig[1,1], aspect = DataAspect())
+# scatterlines!(ax, xy)
+# scatter!(ax, xy[c], color = :red)
+# deleteat!(xy, c)
+# lines!(ax, xy, color = :green)
+#
+# deleteat!(ij, c)
+#
 
-function spiral()
-    n = 100
-    θs = range(0, 3π, n)
-    as = range(-10, 10, n).^2
-    ij = Vector{NTuple{2, Int}}(undef, n)
-    for (i, θ) in enumerate(θs)
-        ij[i] = round.(Int, as[i] .* θ .* reverse(sincos(θ)))
-    end
-    return [i .- ij[1] for i in ij]
-end
-xy = spiral()
-lines(SV.(xy), axis = (; aspect = DataAspect()))
-
-
-
-function get_ij(file)
-    tij = CSV.File(joinpath(results_dir, file))
-    tuple.(tij.i, tij.j)
-end
 
 
 df1 = subset(df, :run_id => ByRow(==(8)))
-transform!(df1, :tij_file => ByRow(get_ij) => :ij)
+transform!(df1, :tij_file => ByRow(get_ij) => [:t, :ij])
 
-fig = pregrouped(df1.ij => first, df1.ij => last) * visual(ScatterLines) |> draw(; axis = (; aspect = DataAspect()))
+# fig = pregrouped(df1.ij => first, df1.ij => last) * visual(ScatterLines) |> draw(; axis = (; aspect = DataAspect()))
 
-using StatsBase, Graphs
 
-vs = copy(df1.ij[1])
+
+ij = copy(df1.ij[1])
+t = copy(df1.t[1])
+tokill = findall(==(0) ∘ norm, diff(SV.(ij))) .+ 1
+deleteat!(ij, tokill)
+deleteat!(t, tokill)
+t, ij = clean_coords(t, ij)
+lines(SV.(ij), axis = (; aspect = DataAspect()))
+# lines!(SV.(ij))
+
+
+
+
+using Interpolations
+
+itp = interpolate(a, BSpline(Constant()))
+
+tokill = findall(==(0) ∘ norm, diff(SV.(ij))) .+ 1
+deleteat!(ij, tokill)
+lines(SV.(ij), axis = (; aspect = DataAspect()))
+while remove_cycles!(ij)
+end
+lines!(SV.(ij))
+
+
+
 function remove_cycles!(ij)
     ids = StatsBase.levelsmap(ij)
     vs = [ids[k] for k in ij]

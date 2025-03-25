@@ -9,12 +9,91 @@ tosecond(t::T) where {T <: TimePeriod} = t / convert(T, Dates.Second(1))
 tosecond(t::TimeType) = tosecond(t - Time(0))
 tosecond(sec::Real) = sec
 
-function get_txy(tij_file, rectify)
-    tij = CSV.File(joinpath(results_dir, tij_file))
+# function get_txy(tij_file, rectify)
+#     tij = CSV.File(joinpath(results_dir, tij_file))
+#     t = range(tij.t[1], tij.t[end], length = length(tij))
+#     ij = SVector{2, Int}.(tij.i, tij.j)
+#     xy = rectify.(ij)
+#     (; t, xy)
+# end
+
+function get_tij(file)
+    tij = CSV.File(joinpath(results_dir, file))
     t = range(tij.t[1], tij.t[end], length = length(tij))
-    ij = SVector{2, Int}.(tij.i, tij.j)
-    xy = rectify.(ij)
-    (; t, xy)
+    t, tuple.(tij.i, tij.j)
+end
+
+
+function remove_cycles(t, ij)
+    t, ij = interpolate_pixels(t, ij)
+    ids = levelsmap(ij)
+    vs = [ids[k] for k in ij]
+    g = DiGraph(length(vs))
+    for (v1, v2) in zip(vs[1:end-1], vs[2:end])
+        add_edge!(g, v1, v2)
+    end
+    c = simplecycles(g)
+    if isempty(c)
+        return (t, ij)
+    end
+    tokill = sort(unique(reduce(vcat, c)))
+    deleteat!(ij, tokill)
+    deleteat!(t, tokill)
+    return (t, ij)
+end
+
+function interpolate_pixels(t, ij)
+    n = length(t)
+    ijs = Vector{Vector{Tuple{Int, Int}}}(undef, n - 1)
+    ts = Vector{Vector{Float64}}(undef, n - 1)
+    for (i, (t1, t2, (y1, x1), (y2, x2))) in enumerate(zip(t[1:end-1], t[2:end], ij[1:end-1], ij[2:end]))
+        indices = bresenham(y1, x1, y2, x2)
+        ijs[i] = indices
+        n = length(indices)
+        if n > 1
+            ts[i] = collect(range(t1, t2, n))
+        else
+            ts[i] = [t1]
+        end
+    end
+    ij = reduce(vcat, ijs)
+    t = reduce(vcat, ts)
+    tokill = findall(==(0) ∘ norm, diff(SV.(ij))) .+ 1
+    deleteat!(ij, tokill)
+    deleteat!(t, tokill)
+    return (t, ij)
+end
+
+function bresenham(y0::Int, x0::Int, y1::Int, x1::Int)
+    dx = abs(x1 - x0)
+    dy = abs(y1 - y0)
+    sx = x0 < x1 ? 1 : -1
+    sy = y0 < y1 ? 1 : -1;
+    err = (dx > dy ? dx : -dy) / 2
+    indices = Vector{Tuple{Int, Int}}(undef, 0)
+    while true
+        push!(indices, (y0, x0))
+        (x0 != x1 || y0 != y1) || break
+        e2 = err
+        if e2 > -dx
+            err -= dy
+            x0 += sx
+        end
+        if e2 < dy
+            err += dx
+            y0 += sy
+        end
+    end
+    return indices
+end
+
+function clean_coords(t, ij)
+    for i in 1:100
+        t, ij = remove_cycles(t, ij)
+    end
+    tl = range(t[1], t[end], step = 1/5)
+    tp = ParametricSpline(t, stack(ij))
+    return (; t = tl, ij = [Tuple(round.(Int, tp(t))) for t in tl])
 end
 
 # function clean_coords!(xy)
