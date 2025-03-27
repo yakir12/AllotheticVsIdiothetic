@@ -2,7 +2,7 @@ using AlgebraOfGraphics, GLMakie, CairoMakie
 
 using HypothesisTests
 
-using StatsBase, Graphs
+# using StatsBase, Graphs
 using Dates, LinearAlgebra, Statistics, Random
 using CSV, DataFrames, CameraCalibrations
 using Interpolations, StaticArrays, Dierckx, CoordinateTransformations, Rotations
@@ -47,6 +47,72 @@ transform!(runs, [:spontaneous_end, :intervention] => ByRow(coalesce) => :poi)
 transform!(runs, :tij_file => ByRow(get_tij) => [:t, :ij])
 # transform!(runs, [:t, :ij] => ByRow(clean_coords) => [:t, :ij])
 transform!(runs, [:ij, :rectify] => ByRow((ij, fun) -> fun.(ij)) => :xy)
+
+
+
+df = subset(runs, :light => ByRow(==("shift")))
+df1 = subset(df, :run_id => ByRow(==(8)))
+
+xy = copy(df1.xy[])
+δ = norm.(diff(xy))
+tokill = findall(δ .< 0.1)
+deleteat!(xy, tokill)
+
+t = 1:length(xy)
+dierckx_spline = ParametricSpline(t, stack(xy), k = 3, s = 100)
+xys = dierckx_spline.(t)
+
+interpolations_spline = interpolate(stack(xys)', (BSpline(Cubic(Natural(OnGrid()))), NoInterp()))
+interpolations_spl(t) = interpolations_spline(t, 1:2)
+
+xys2 = interpolations_spl.(t)
+
+lines(xy[1:10:end], axis = (; aspect = DataAspect(), limits = ((-50, 30), (0, 30))))
+
+lines!(SV.(xys))
+lines!(SV.(xys2))
+
+# scatter!(xys[todo])
+
+# θ = [atan(reverse(derivative(spl, ti))...) for ti in t]
+# unwrap!(θ)
+
+# todo = findall(>(π) ∘ abs, θ)
+
+# lines(t, rad2deg.(θ))
+# scatter!(t[todo], rad2deg.(θ[todo]))
+
+
+
+using Optim, StaticArrays, Dierckx
+
+function detect_self_intersection(spl, t1, t2)
+    min_step = 10
+    lx = Float64[t1, min_step]
+    ux = Float64[t2 - min_step, t2 - t1]
+    con_c!(c, x) = sum!(c, x)
+    lc = [t1 + min_step]
+    uc = [t2]
+    dfc = TwiceDifferentiableConstraints(con_c!, lx, ux, lc, uc, :forward)
+
+    x0 = (2lx .+ ux) ./ 3
+
+    # x0 = [(t1 + t2 - min_step)/2, (t2 - (t1 + t2 - min_step)/2)/2]
+
+    fun(x) = norm(spl(x[1]) - spl(sum(x)))
+    df = TwiceDifferentiable(fun, x0; autodiff=:forward)
+
+    res = optimize(df, dfc, x0, IPNewton())
+    t, step = Optim.minimizer(res)
+    return (t1 = t, t2 = t + step)
+end
+
+t1, t2 = detect_self_intersection(interpolations_spl, 1, 100)
+
+
+
+
+
 # transform!(runs, [:t, :xy] => ByRow(prune_coords!) => [:t, :xy])
 transform!(runs, [:t, :xy, :poi] => ByRow(impute_poi_time) => :poi)
 disallowmissing!(runs, :poi)
