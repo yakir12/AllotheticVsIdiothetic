@@ -43,6 +43,8 @@ ti1, ti2 = detect_self_intersection(spl, t1, t2)
 scatter!(spl(ti1), color = :red, markersize = 20)
 scatter!(spl(ti2), color = :green, marker = :+)
 
+using GeometryBasics
+a = self_intersections(Point2.(xy))
 
 t = filter(x -> !(ti1 < x < ti2), t)
 push!(t, ti1)

@@ -58,9 +58,41 @@ xy = copy(df1.xy[])
 tokill = findall(δ .< 0.1)
 deleteat!(xy, tokill)
 
-t = 1:length(xy)
+
+
+using GeometryBasics
+
+n = length(xy)
+t = 1:n
 dierckx_spline = ParametricSpline(t, stack(xy), k = 3, s = 100)
+t = range(1, n, 100n)
+n = length(t)
+xys = Point2.(dierckx_spline.(t))
+
+lines(xys, axis = (; aspect = DataAspect(), limits = ((-50, 30), (0, 30))))
+
+inds, _ = self_intersections(xys)
+pushfirst!(inds, 1)
+push!(inds, n)
+
+t = t[vcat(splat(UnitRange).(Iterators.partition(inds, 2))...)]
+
+n = length(t)
 xys = dierckx_spline.(t)
+
+scatter!(Point2f.(xys))
+
+interpolations_spline = interpolate(stack(xys)', (BSpline(Cubic(Natural(OnGrid()))), NoInterp()))
+
+t = range(1, n, 100000)
+
+xys = [SV(interpolations_spline(i, 1:2)) for i in t]
+
+lines!(xys)
+
+kdsahgsahglsh
+
+
 
 interpolations_spline = interpolate(stack(xys)', (BSpline(Cubic(Natural(OnGrid()))), NoInterp()))
 interpolations_spl(t) = interpolations_spline(t, 1:2)
