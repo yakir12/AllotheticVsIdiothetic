@@ -53,6 +53,35 @@ transform!(runs, [:ij, :rectify] => ByRow((ij, fun) -> fun.(ij)) => :xy)
 df = subset(runs, :light => ByRow(==("shift")))
 df1 = subset(df, :run_id => ByRow(==(8)))
 
+function remove_stops(t_range::AbstractRange,, xy)
+    tokill = Int[]
+    last_xy = xy[1]
+    for i in 2:length(t)
+        Δ = norm(xy[i] - last_xy)
+        if Δ > 0.1
+            last_xy = xy[i]
+        else
+            push!(tokill, i)
+        end
+    end
+    t = collect(t_range)
+    deleteat!(t, tokill)
+    deleteat!(xy, tokill)
+    return (t, xy)
+end
+
+function clean_track(t, xy)
+    t, xy = remove_stops(t, xy)
+    n = length(xy)
+    t = 1:n
+    dierckx_spline = ParametricSpline(t, stack(xy), k = 3, s = 100)
+    t = range(1, n, 100n)
+    n = length(t)
+    xys = Point2.(dierckx_spline.(t))
+
+
+end
+
 xy = copy(df1.xy[])
 δ = norm.(diff(xy))
 tokill = findall(δ .< 0.1)
