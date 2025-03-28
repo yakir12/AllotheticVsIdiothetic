@@ -51,43 +51,11 @@ transform!(runs, [:t, :xy, :poi] => ByRow(impute_poi_time) => :poi)
 disallowmissing!(runs, :poi)
 transform!(runs, [:xy, :t, :poi] => ByRow(glue_poi_index!) => [:poi_index, :dance_jump])
 
-
-
-
-# transform!(runs, [:t, :ij] => ByRow(clean_coords) => [:t, :ij])
-
-
-
-# df = subset(runs, :light => ByRow(==("shift")))
-# i = 9
-# scatterlines(df.xy[i], axis = (; aspect = DataAspect()))
-# poi_index = something(findfirst(≥(df.poi[i]), df.t[i]), length(df.t[i]))
-# scatter!(df.xy[i][poi_index], color = :red)
-
-
-
 transform!(runs, [:t, :xy] => ByRow(smooth_clean_center_track) => [:ts, :xys, :spl])
 
-
-# i = 204
-# lines(runs.xys[i], axis = (;aspect = DataAspect()))
-# poi_index = something(findfirst(≥(runs.poi[i]), runs.ts[i]), length(runs.ts[i]))
-# scatter!(runs.xys[i][poi_index])
-
-
-
-
-# transform!(runs, [:t, :xy] => ByRow(prune_coords!) => [:t, :xy])
-# transform!(runs, [:xy, :t] => ByRow(get_spline) => :spl)
+transform!(runs, [:xys, :poi_index] => ByRow((xy, i) -> get_rotation(xy[i])) => :tform)
 
 transform!(runs, :xys => ByRow(get_pathlength) => :l)
-
-# transform!(runs, :t => ByRow(x -> similar(x, Float64)) => :l)
-# Threads.@threads for row in eachrow(runs)
-#     row.l = get_pathlength(row.t, row.spl)
-# end
-
-# transform!(runs, [:t, :spl, :poi_index] => ByRow(get_smooth_center_poi_rotate) => :tform)
 
 transform!(runs, [:ts, :spl, :poi_index] => ByRow(get_turn_profile) => [:tθ, :θ])
 transform!(runs, [:tθ, :θ] => ByRow(fit_logistic) => :ks)
@@ -245,13 +213,13 @@ combine(groupby(df, :condition), nrow).nrow
 
 ######################## Figure 1
 
-df1 = subset(df, :xyc => ByRow(≥(50) ∘ norm ∘ last))
-transform!(df1, :xyc => ByRow(xy -> cropto(xy, 50)) => :xyc)
+df1 = subset(df, :xys => ByRow(≥(50) ∘ norm ∘ last))
+transform!(df1, :xys => ByRow(xy -> cropto(xy, 50)) => :xys)
 transform!(groupby(df1, :condition), eachindex => :n)
 subset!(df1, :n => ByRow(≤(10)))
 @assert all(==(10), combine(groupby(df1, :condition), nrow).nrow)
 
-fig = pregrouped(df1.xyc => first, df1.xyc => last, col = df1.condition => my_renamer) * visual(Lines) |> draw(; figure = (; size = (1200, 400)), axis=(aspect=DataAspect(), ))
+fig = pregrouped(df1.xys => first, df1.xys => last, col = df1.condition => my_renamer) * visual(Lines) |> draw(; figure = (; size = (1200, 400)), axis=(aspect=DataAspect(), ))
 for ax in fig.figure.content 
     if ax isa Axis
         for r  in (30, 50)
@@ -265,7 +233,7 @@ save(joinpath(output, "figure4.png"), fig)
 
 ######################## Figure 2
 
-df1 = transform(df, [:t, :poi_index, :tform] => ByRow((t, i, f) -> f.(t[i:end])) => :xyp)
+df1 = transform(df, [:xys, :tform] => ByRow((xy, f) -> f.(xy)) => :xyp)
 
 fig = pregrouped(df1.xyp => first => "X (cm)", df1.xyp => last => "Y (cm)", col = df1.condition => my_renamer) * visual(Lines) |> draw(; figure = (; size = (1200, 300)), axis=(aspect=DataAspect(), limits = (nothing, (-5, nothing))))
 

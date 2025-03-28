@@ -215,7 +215,7 @@ end
 # end
 
 function get_rotation(p2)
-    θ = -π/2 - atan(reverse(p2)...)
+    θ = π/2 + atan(reverse(p2)...)
     LinearMap(Angle2d(θ))
 end
 
