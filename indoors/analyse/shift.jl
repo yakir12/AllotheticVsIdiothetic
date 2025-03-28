@@ -1,6 +1,7 @@
 using AlgebraOfGraphics, GLMakie, CairoMakie
 
 using HypothesisTests
+using GeometryBasics
 
 # using StatsBase, Graphs
 using Dates, LinearAlgebra, Statistics, Random
@@ -45,201 +46,93 @@ transform!(runs, :spontaneous_end => ByRow(passmissing(tosecond)), renamecols = 
 transform!(runs, [:spontaneous_end, :intervention] => ByRow(coalesce) => :poi)
 
 transform!(runs, :tij_file => ByRow(get_tij) => [:t, :ij])
-# transform!(runs, [:t, :ij] => ByRow(clean_coords) => [:t, :ij])
 transform!(runs, [:ij, :rectify] => ByRow((ij, fun) -> fun.(ij)) => :xy)
+transform!(runs, [:t, :xy, :poi] => ByRow(impute_poi_time) => :poi)
+disallowmissing!(runs, :poi)
+transform!(runs, [:xy, :t, :poi] => ByRow(glue_poi_index!) => [:poi_index, :dance_jump])
 
 
 
-df = subset(runs, :light => ByRow(==("shift")))
-df1 = subset(df, :run_id => ByRow(==(8)))
 
-function remove_stops(t_range::AbstractRange,, xy)
-    tokill = Int[]
-    last_xy = xy[1]
-    for i in 2:length(t)
-        Δ = norm(xy[i] - last_xy)
-        if Δ > 0.1
-            last_xy = xy[i]
-        else
-            push!(tokill, i)
-        end
-    end
-    t = collect(t_range)
-    deleteat!(t, tokill)
-    deleteat!(xy, tokill)
-    return (t, xy)
-end
-
-function clean_track(t, xy)
-    t, xy = remove_stops(t, xy)
-    n = length(xy)
-    t = 1:n
-    dierckx_spline = ParametricSpline(t, stack(xy), k = 3, s = 100)
-    t = range(1, n, 100n)
-    n = length(t)
-    xys = Point2.(dierckx_spline.(t))
-
-
-end
-
-xy = copy(df1.xy[])
-δ = norm.(diff(xy))
-tokill = findall(δ .< 0.1)
-deleteat!(xy, tokill)
+# transform!(runs, [:t, :ij] => ByRow(clean_coords) => [:t, :ij])
 
 
 
-using GeometryBasics
-
-n = length(xy)
-t = 1:n
-dierckx_spline = ParametricSpline(t, stack(xy), k = 3, s = 100)
-t = range(1, n, 100n)
-n = length(t)
-xys = Point2.(dierckx_spline.(t))
-
-lines(xys, axis = (; aspect = DataAspect(), limits = ((-50, 30), (0, 30))))
-
-inds, _ = self_intersections(xys)
-pushfirst!(inds, 1)
-push!(inds, n)
-
-t = t[vcat(splat(UnitRange).(Iterators.partition(inds, 2))...)]
-
-n = length(t)
-xys = dierckx_spline.(t)
-
-scatter!(Point2f.(xys))
-
-interpolations_spline = interpolate(stack(xys)', (BSpline(Cubic(Natural(OnGrid()))), NoInterp()))
-
-t = range(1, n, 100000)
-
-xys = [SV(interpolations_spline(i, 1:2)) for i in t]
-
-lines!(xys)
-
-kdsahgsahglsh
+# df = subset(runs, :light => ByRow(==("shift")))
+# i = 9
+# scatterlines(df.xy[i], axis = (; aspect = DataAspect()))
+# poi_index = something(findfirst(≥(df.poi[i]), df.t[i]), length(df.t[i]))
+# scatter!(df.xy[i][poi_index], color = :red)
 
 
 
-interpolations_spline = interpolate(stack(xys)', (BSpline(Cubic(Natural(OnGrid()))), NoInterp()))
-interpolations_spl(t) = interpolations_spline(t, 1:2)
-
-xys2 = interpolations_spl.(t)
-
-lines(xy[1:10:end], axis = (; aspect = DataAspect(), limits = ((-50, 30), (0, 30))))
-
-lines!(SV.(xys))
-lines!(SV.(xys2))
-
-# scatter!(xys[todo])
-
-# θ = [atan(reverse(derivative(spl, ti))...) for ti in t]
-# unwrap!(θ)
-
-# todo = findall(>(π) ∘ abs, θ)
-
-# lines(t, rad2deg.(θ))
-# scatter!(t[todo], rad2deg.(θ[todo]))
+transform!(runs, [:t, :xy] => ByRow(smooth_clean_center_track) => [:ts, :xys, :spl])
 
 
-
-using Optim, StaticArrays, Dierckx
-
-function detect_self_intersection(spl, t1, t2)
-    min_step = 10
-    lx = Float64[t1, min_step]
-    ux = Float64[t2 - min_step, t2 - t1]
-    con_c!(c, x) = sum!(c, x)
-    lc = [t1 + min_step]
-    uc = [t2]
-    dfc = TwiceDifferentiableConstraints(con_c!, lx, ux, lc, uc, :forward)
-
-    x0 = (2lx .+ ux) ./ 3
-
-    # x0 = [(t1 + t2 - min_step)/2, (t2 - (t1 + t2 - min_step)/2)/2]
-
-    fun(x) = norm(spl(x[1]) - spl(sum(x)))
-    df = TwiceDifferentiable(fun, x0; autodiff=:forward)
-
-    res = optimize(df, dfc, x0, IPNewton())
-    t, step = Optim.minimizer(res)
-    return (t1 = t, t2 = t + step)
-end
-
-t1, t2 = detect_self_intersection(interpolations_spl, 1, 100)
-
+# i = 204
+# lines(runs.xys[i], axis = (;aspect = DataAspect()))
+# poi_index = something(findfirst(≥(runs.poi[i]), runs.ts[i]), length(runs.ts[i]))
+# scatter!(runs.xys[i][poi_index])
 
 
 
 
 # transform!(runs, [:t, :xy] => ByRow(prune_coords!) => [:t, :xy])
-transform!(runs, [:t, :xy, :poi] => ByRow(impute_poi_time) => :poi)
-disallowmissing!(runs, :poi)
-transform!(runs, [:xy, :t, :poi] => ByRow(glue_poi_index!) => [:poi_index, :dance_jump])
-transform!(runs, [:xy, :t] => ByRow(get_spline) => :spl)
+# transform!(runs, [:xy, :t] => ByRow(get_spline) => :spl)
 
-transform!(runs, :t => ByRow(x -> similar(x, Float64)) => :l)
-Threads.@threads for row in eachrow(runs)
-    row.l = get_pathlength(row.t, row.spl)
-end
+transform!(runs, :xys => ByRow(get_pathlength) => :l)
 
-transform!(runs, [:t, :spl] => ByRow(smooth_center) => :xyc)
-transform!(runs, [:t, :spl, :poi_index] => ByRow(get_smooth_center_poi_rotate) => :tform)
+# transform!(runs, :t => ByRow(x -> similar(x, Float64)) => :l)
+# Threads.@threads for row in eachrow(runs)
+#     row.l = get_pathlength(row.t, row.spl)
+# end
 
-transform!(runs, [:t, :spl, :poi_index] => ByRow(get_turn_profile) => [:tθ, :θ])
-# transform!(runs, [:tθ, :θ] => ByRow(fit_logistic) => :ks)
-# transform!(runs, [:tθ, :ks] => ByRow((x, p) -> logistic.(x, p[2], p[1], 0)) => :θs, :ks => ByRow(first) => :k)
+# transform!(runs, [:t, :spl, :poi_index] => ByRow(get_smooth_center_poi_rotate) => :tform)
+
+transform!(runs, [:ts, :spl, :poi_index] => ByRow(get_turn_profile) => [:tθ, :θ])
+transform!(runs, [:tθ, :θ] => ByRow(fit_logistic) => :ks)
+transform!(runs, [:tθ, :ks] => ByRow((x, p) -> logistic.(x, p[2], p[1], 0)) => :θs, :ks => ByRow(first) => :k)
 
 df = subset(runs, :light => ByRow(==("shift")))
 
 my_renamer = uppercasefirst ∘ string
 
 
-df1 = subset(df, :run_id => ByRow(==(8)))
+# df1 = subset(df, :run_id => ByRow(==(8)))
 
-fig = pregrouped(df1.xyc => first, df1.xyc => last) * visual(Lines) |> draw(; axis = (; aspect = DataAspect()))
-display(fig)
+# fig = pregrouped(df1.xys => first, df1.xys => last) * visual(Lines) |> draw(; axis = (; aspect = DataAspect()))
+# display(fig)
 
-sdjkhfgksdljfhsfhj
-# fig = (pregrouped(df1.xyc => first, df1.xyc => last) + pregrouped(df1.xy => first, df1.xy => last)) * visual(Lines) |> draw(; axis = (; aspect = DataAspect()))
+# fig = (pregrouped(df1.xys => first, df1.xys => last) + pregrouped(df1.xy => first, df1.xy => last)) * visual(Lines) |> draw(; axis = (; aspect = DataAspect()))
 
-pregrouped(df.tθ, df.θ => rad2deg, row = df.dance_induced, col = df.at_run => nonnumeric) * visual(Lines) |> draw()
+# pregrouped(df.tθ, df.θ => rad2deg, row = df.dance_induced, col = df.at_run => nonnumeric) * visual(Lines) |> draw()
 
-pregrouped(df.tθ, df.θ => rad2deg, layout = string.(df.run_id, " ", df.condition)) * visual(Lines) |> draw()
+df1 = subset(df, :dance_induced => ByRow(x -> x))
+(pregrouped(df1.tθ, df1.θ => rad2deg)  * visual(Lines) + pregrouped(df1.tθ, df1.θs => rad2deg)  * visual(Lines; color = :red)) * pregrouped(layout = string.(df1.run_id, " ", df1.condition)) |> draw()
 
-fig
-
-
-
-t = df1.t[1]
-spl = df1.spl[1]
-t1 = 30:0.04:40
-xy = SV.(spl.(t1))
-lines(xy)
-scatter!(SV(spl(31.31)))
-scatter!(SV(spl(39.52)))
-
-f = Figure()
-ax1 = Axis(f[1, 1], yticklabelcolor = :blue, ylabel = "x")
-ax2 = Axis(f[1, 1], yticklabelcolor = :red, yaxisposition = :right, ylabel = "y")
-hidespines!(ax2)
-hidexdecorations!(ax2)
-lines!(ax1, t1, first.(xy), color = :blue)
-lines!(ax2, t1, last.(xy), color = :red)
-vlines!(ax2, [31.31, 39.52])
-
-
-function arclength(spl, t1, t2; kws...)
-    knots = get_knots(spl)
-    filter!(t -> t1 < t < t2, knots)
-    pushfirst!(knots, t1)
-    push!(knots, t2)
-    s, _ = quadgk(t -> norm(derivative(spl, t)), knots; kws...)
-    return s
+fig = Figure()
+ax = Axis(fig[1,1], aspect = DataAspect(), limits = ((-100, 100), (-100, 100)))
+sl = SliderGrid(fig[2, 1], (range = 1:nrow(df), ))
+i = only(sl.sliders).value
+track1 = lift(i) do i
+    df.xy[i] .- Ref(df.xy[i][1])
 end
-xy = SV.(spl.(t))
+track2 = lift(i) do i
+    df.xys[i]
+end
+poi = lift(i) do i
+    df.xy[i][1:df.poi_index[i]] .- Ref(df.xy[i][1])
+end
+lines!(ax, track1)
+lines!(ax, track2)
+lines!(ax, poi, color = :red)
+
+
+
+(pregrouped(df.xy => first, df.xy => last)  * visual(Lines) + pregrouped(df.xys => first, df.xys => last)  * visual(Lines; color = :red)) * pregrouped(layout = string.(df.run_id, " ", df.condition)) |> draw()
+
+data(df) * mapping(:dance_induced, :k, row = :at_run => nonnumeric) * visual(RainClouds, violin_limits = (0, Inf)) |> draw()
+
 
 sdjkhfgksdljfhsfhj
 
