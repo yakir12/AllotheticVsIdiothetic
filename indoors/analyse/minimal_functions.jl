@@ -1,8 +1,23 @@
 const SV = SVector{2, Float64}
 
+function trectify(fs, xs)
+    n = length(xs)
+    ys = Vector{Vector{SVector{2, Float64}}}.(undef, n)
+    Threads.@threads for i in 1:n
+        y = fs[i].(xs[i])
+        y .-= Ref(y[1])
+        ys[i] = y
+    end
+    return ys
+end
+
+
+
 function get_calibration(calibration_id)
     c = CameraCalibrations.load(joinpath(results_dir, calibration_id))
-    rectification(c)
+    f = rectification(c)
+    # fun(ij)::Function = f.(ij)
+    return f
 end
 
 tosecond(t::T) where {T <: TimePeriod} = t / convert(T, Dates.Second(1))
@@ -20,58 +35,71 @@ tosecond(sec::Real) = sec
 function get_tij(file)
     tij = CSV.File(joinpath(results_dir, file))
     t = range(tij.t[1], tij.t[end], length = length(tij))
-    t, tuple.(tij.i, tij.j)
+    (; t = collect(t), ij = tuple.(tij.i, tij.j))
 end
 
-function remove_stops!(t, xy)
-    tokill = Int[]
-    last_xy = xy[1]
-    for i in 2:length(t)
-        Δ = norm(xy[i] - last_xy)
-        if Δ > 0.1
-            last_xy = xy[i]
-        else
-            push!(tokill, i)
-        end
-    end
+function remove_stops!(t, ij)
+    tokill = map(==, ij[1:end - 1], ij[2:end])
+    pushfirst!(tokill, false)
     deleteat!(t, tokill)
-    deleteat!(xy, tokill)
-    return (t, xy)
+    deleteat!(ij, tokill)
+    return (; t, ij)
 end
 
-function remove_loops!(t, xys)
-    inds, _ = self_intersections(Point2f.(xys))
+# function remove_stops!(t, xy)
+#     tokill = Int[]
+#     last_xy = xy[1]
+#     for i in 2:length(t)
+#         Δ = norm(xy[i] - last_xy)
+#         if Δ > 0.1
+#             last_xy = xy[i]
+#         else
+#             push!(tokill, i)
+#         end
+#     end
+#     deleteat!(t, tokill)
+#     deleteat!(xy, tokill)
+#     return (; t, xy)
+# end
+#
+function remove_loops!(t, xy)
+    inds, _ = self_intersections(Point2f.(xy))
     ranges = splat(UnitRange).(Iterators.partition(inds, 2))
-    filter!(<(10) ∘ length, ranges)
+    filter!(<(51) ∘ length, ranges)
     tokill = vcat(ranges...)
     unique!(tokill)
     sort!(tokill)
     deleteat!(t, tokill)
-    deleteat!(xys, tokill)
-    return (t, xys)
+    deleteat!(xy, tokill)
+    return (; t, xy)
 end
 
-function smooth_clean_center_track(t, xy)
-    t = collect(t)
-    xy = copy(xy)
-    remove_stops!(t, xy)
-    dierckx_spline = ParametricSpline(t, stack(xy), k = 3, s = 100)
-    xys = SV.(dierckx_spline.(t))
-    t1 = t[1]
-    t2 = t[end]
-    xys1 = xys[1]
-    xys2 = xys[end]
-    remove_loops!(t, xys)
-    if t[1] ≠ t1
-        pushfirst!(t, t1)
-        pushfirst!(xys, xys1)
-    end
-    if t[end] ≠ t2
-        push!(t, t2)
-        push!(xys, xys2)
-    end
+function sparseify(t, xy, poi)
+    spl = ParametricSpline(t, stack(xy))
+    tl = round(Int, t[1]):round(Int, t[end])
+    poi_index = findfirst(==(round(Int, poi)), tl)
+    (; t = tl, xy = SV.(spl.(tl)), poi_index)
+end
+
+function smooth(t, xy)
+    spl = ParametricSpline(t, stack(xy), k = 3, s = 50)
+    xys = SV.(spl.(t))
     xys .-= Ref(xys[1])
-    return (t, xys, dierckx_spline)
+    # t1 = t[1]
+    # t2 = t[end]
+    # xys1 = xys[1]
+    # xys2 = xys[end]
+    # remove_loops!(t, xys)
+    # if t[1] ≠ t1
+    #     pushfirst!(t, t1)
+    #     pushfirst!(xys, xys1)
+    # end
+    # if t[end] ≠ t2
+    #     push!(t, t2)
+    #     push!(xys, xys2)
+    # end
+    # xys .-= Ref(xys[1])
+    return (; xys, spl)
 end
 
 
@@ -176,32 +204,32 @@ end
 #     return (; t, xy)
 # end
 
-impute_poi_time(_, _, poi::Float64) = poi
-function impute_poi_time(t, xy, ::Missing)
+function impute_poi_time(t, xy)
     poi_index = something(findfirst(>(10) ∘ norm, xy .- Ref(xy[1])), length(xy))
     t[poi_index]
 end
 
-function gluePOI!(xy, poi_index)
+function glue_intervention!(xy, t, intervention)
+    inter_i = something(findfirst(≥(intervention), t), length(t))
     h = 2
-    diffs = diff(xy[1:poi_index + h + 1])
+    diffs = diff(xy[1:inter_i + h + 1])
     Δs = norm.(diffs)
-    μ = mean(Δs[1:poi_index - h])
-    σ = std(Δs[1:poi_index - h], mean = μ)
-    for i in poi_index - h:poi_index + h
+    μ = mean(Δs[1:inter_i - h])
+    σ = std(Δs[1:inter_i - h], mean = μ)
+    for i in inter_i - h:inter_i + h
         if Δs[i] > μ + 1.5σ
-            xy[i + 1:end] .-= Ref(diffs[i])
+            xy[i + 1:end] .-= Ref(diffs[i] - μ*normalize(diffs[i]))
             return Δs[i]
         end
     end
-    return nothing
+    return missing
 end
 
-function glue_poi_index!(xy, t, poi::Float64)
-    poi_index = something(findfirst(≥(poi), t), length(t))
-    Δ = gluePOI!(xy, poi_index)
-    (; poi_index, dance_jump = Δ)
-end
+# function glue_poi_index!(xy, t, poi::Float64)
+#     poi_index = something(findfirst(≥(poi), t), length(t))
+#     Δ = gluePOI!(xy, poi_index)
+#     (; poi_index, dance_jump = Δ)
+# end
 
 # function get_spline(xy, t)
 #     k, s = (3, 300)
@@ -244,7 +272,7 @@ end
 
 
 function get_turn_profile(t, spl, poi_index)
-    i1 = poi_index#something(findfirst(≥(t[poi_index] - 1), t), length(t))
+    i1 = 1#something(findfirst(≥(t[poi_index] - 2), t), length(t))
     tθ = t[i1:end]
     θ = [atan(reverse(derivative(spl, ti))...) for ti in tθ]
     θ₀ = θ[1]
@@ -298,14 +326,22 @@ end
 
 function fit_logistic(tθ, θ)
     lb = [0.0, 0]
-    ub = [100.0, 5pi]
+    ub = [300.0, 2pi]
     p0 = [0.1, pi]
-    model(x, p) = logistic.(x, p[2], p[1], 0)
-    fit = curve_fit(model, tθ, θ, p0, lower = lb, upper = ub)
+    fit = curve_fit(logistic, tθ, θ, p0, lower = lb, upper = ub)
+    fit.param
+end
+
+function fit_logistic(tθ, θ)
+    lb = [0.0, 0, -20]
+    ub = [300.0, 5pi, 20]
+    p0 = [0.1, pi, 0]
+    fit = curve_fit(logistic, tθ, θ, p0, lower = lb, upper = ub)
     fit.param
 end
 
 logistic(x, L, k, x₀) = L / (1 + exp(-k*(x - x₀))) - L/2
+logistic(x, p) = logistic.(x, p[2], p[1], p[3])
 
 
 #######################

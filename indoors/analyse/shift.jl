@@ -1,5 +1,6 @@
 using AlgebraOfGraphics, GLMakie, CairoMakie
 
+using DataFramesMeta, Chain
 using HypothesisTests
 using GeometryBasics
 
@@ -31,35 +32,138 @@ function combine_factors(light, induced, run)
 end
 
 runs = CSV.read(joinpath(results_dir, "runs.csv"), DataFrame)
-transform!(runs, :spontaneous_end => ByRow(!ismissing) => :dance_spontaneous)
-transform!(runs, [:light, :dance_induced, :at_run] => ByRow(combine_factors) => :condition)
-# runs.condition .= categorical(runs.condition; levels = ["remain", "dark", "dark induced", "shift", "shift induced"], ordered = true)
-
+@rsubset!(runs, :light == "shift")
+select!(runs, Not(:runs_path, :start_location, :fps, :target_width, :runs_file, :window_size))
 calibs = CSV.read(joinpath(results_dir, "calibs.csv"), DataFrame)
 transform!(calibs, :calibration_id => ByRow(get_calibration) => :rectify)
 select!(calibs, Cols(:calibration_id, :rectify))
 leftjoin!(runs, calibs, on = :calibration_id)
-select!(runs, Not(:runs_path, :start_location, :calibration_id, :fps, :target_width, :runs_file, :window_size))
+select!(runs, Not(:calibration_id))
+@chain runs begin
+    @rename! :intervention = :poi
+    @rtransform! $AsTable = get_tij(:tij_file)
+    @rtransform! $AsTable = remove_stops!(:t, :ij)
+    @transform! :xy = trectify(:rectify, :ij)
+    @aside @chain _ begin 
+        @subset(:dance_induced; view = true)
+        # @aside pregrouped(_.xy => first, _.xy => last)  * visual(Lines) * pregrouped(layout = _.run_id => nonnumeric) |> draw(figure = (;size = (1000, 1000)), axis = (;aspect = DataAspect())) |> save("before.png")
+        @rtransform! :jump = glue_intervention!(:xy, :t, :intervention)
+    end
+    @aside @chain _ begin 
+        @subset(:light .== "remain"; view = true)
+        @rtransform! :poi = impute_poi_time(:t, :xy)
+    end
+    @rtransform! :spontaneous_end = passmissing(tosecond)(:spontaneous_end)
+    @rtransform! :poi = coalesce(:spontaneous_end, :intervention, :poi)
+    disallowmissing!(:poi)
+    @rtransform! :poi_index = something(findfirst(≥(:poi), :t), length(:t))
+    @rtransform! $AsTable = remove_loops!(:t, :xy)
+    @rtransform! $AsTable = sparseify(:t, :xy, :poi)
+    @rtransform! $AsTable = smooth(:t, :xy)
+    @rtransform! :dance_spontaneous = !ismissing(:spontaneous_end)
+    @rtransform! :condition = combine_factors(:light, :dance_induced, :at_run)
+    # @rtransform! :tform = get_rotation(:xys[:poi_index])
+    @rtransform! :l = get_pathlength(:xys)
+    @rtransform! $AsTable = get_turn_profile(:t, :spl, :poi_index)
+    @rtransform! :ks = fit_logistic(:tθ, :θ)
+    @rtransform! :θs = logistic.(:tθ, Ref([:ks; 0]))
+    @transform! :k = first.(:ks)
+end
 
-rename!(runs, :poi => :intervention)
-transform!(runs, :spontaneous_end => ByRow(passmissing(tosecond)), renamecols = false)
-transform!(runs, [:spontaneous_end, :intervention] => ByRow(coalesce) => :poi)
+function loops(xy)
+    inds, _ = self_intersections(Point2f.(xy))
+    ranges = splat(UnitRange).(Iterators.partition(inds, 2))
+    length.(ranges)
+end
 
-transform!(runs, :tij_file => ByRow(get_tij) => [:t, :ij])
-transform!(runs, [:ij, :rectify] => ByRow((ij, fun) -> fun.(ij)) => :xy)
-transform!(runs, [:t, :xy, :poi] => ByRow(impute_poi_time) => :poi)
-disallowmissing!(runs, :poi)
-transform!(runs, [:xy, :t, :poi] => ByRow(glue_poi_index!) => [:poi_index, :dance_jump])
+l = map(loops, df.xy)
+l = reduce(vcat, l)
 
-transform!(runs, [:t, :xy] => ByRow(smooth_clean_center_track) => [:ts, :xys, :spl])
+df = copy(runs)
+fig = Figure()
+ax = Axis(fig[1,1], aspect = DataAspect(), limits = ((-100, 100), (-100, 100)))
+sl = SliderGrid(fig[3, 1], (range = 1:nrow(df), ))
+i = only(sl.sliders).value
+poi1 = lift(i) do i
+    df.xy[i][1:df.poi_index[i]]
+end
+poi2 = lift(i) do i
+    df.xys[i][1:df.poi_index[i]]
+end
+tra1 = lift(i) do i
+    df.xy[i][df.poi_index[i]:end]
+end
+tra2 = lift(i) do i
+    df.xys[i][df.poi_index[i]:end]
+end
+sl = SliderGrid(fig[4, 1], (range = 1:minimum(length, df.t), ))
+j = only(sl.sliders).value
+xy1 = lift(i, j) do i, j
+    df.xy[i][j]
+end
+xy2 = lift(i, j) do i, j
+    df.xys[i][j]
+end
+lines!(ax, poi1, color = :black)
+lines!(ax, poi2, color = :red)
+lines!(ax, tra1, color = :blue)
+lines!(ax, tra2, color = :green)
+scatter!(ax, xy1)
+scatter!(ax, xy2)
+ax1 = Axis(fig[2,1], limits = (nothing, (-90, 360)), yticks = -90:90:360)
+turn1 = lift(i) do i
+    Point2f.(df.tθ[i][1:df.poi_index[i]], rad2deg.(df.θ[i][1:df.poi_index[i]]))
+end
+turn2 = lift(i) do i
+    Point2f.(df.tθ[i][df.poi_index[i]:end], rad2deg.(df.θ[i][df.poi_index[i]:end]))
+end
+txy = lift(i, j) do i, j
+    Point2f(df.tθ[i][j], rad2deg(df.θ[i][j]))
+end
+lines!(ax1, turn1, color = :red)
+lines!(ax1, turn2, color = :green)
+scatter!(ax1, txy)
+on(turn) do t
+    limits!(ax1, -1, first(last(t)) + 1, -90, 360)
+end
 
-transform!(runs, [:xys, :poi_index] => ByRow((xy, i) -> get_rotation(xy[i])) => :tform)
 
-transform!(runs, :xys => ByRow(get_pathlength) => :l)
 
-transform!(runs, [:ts, :spl, :poi_index] => ByRow(get_turn_profile) => [:tθ, :θ])
-transform!(runs, [:tθ, :θ] => ByRow(fit_logistic) => :ks)
-transform!(runs, [:tθ, :ks] => ByRow((x, p) -> logistic.(x, p[2], p[1], 0)) => :θs, :ks => ByRow(first) => :k)
+df1 = @rsubset(runs, !(:dance_induced))
+
+(pregrouped(df1.tθ, df1.θ => rad2deg)  * visual(Lines) + pregrouped(df1.tθ, df1.θs => rad2deg)  * visual(Lines; color = :red)) * pregrouped(layout = string.(df1.run_id, " ", df1.condition)) |> draw(axis = (;limits = (nothing, (-10, 360))))
+
+data(runs) * mapping(:dance_induced, :k, row = :at_run => nonnumeric) * visual(RainClouds, violin_limits = (0, Inf)) |> draw()
+
+
+i = 7
+df = runs[i:i, :]
+(pregrouped(df.xy => first, df.xy => last)  * visual(Lines) + pregrouped(df.xys => first, df.xys => last)  * visual(Lines; color = :red)) * pregrouped(layout = string.(df.run_id, " ", df.condition)) |> draw(figure = (;size = (1000, 1000)), axis = (;aspect = DataAspect()))
+
+
+
+# @chain runs begin 
+#     @subset(:dance_induced)
+#     pregrouped(_.xy => first, _.xy => last)  * visual(Lines) * pregrouped(layout = _.run_id => nonnumeric) |> draw(figure = (;size = (1000, 1000)), axis = (;aspect = DataAspect())) |> save("after.png")
+# end
+
+
+
+sdjkfghasdklhfsdkh
+
+julia> findall(>(360), rad2deg.(last.(runs.ks)) ./ 2)
+3-element Vector{Int64}:
+  72
+ 112
+ 123
+
+
+# runs.condition .= categorical(runs.condition; levels = ["remain", "dark", "dark induced", "shift", "shift induced"], ordered = true)
+
+
+
+
+
 
 df = subset(runs, :light => ByRow(==("shift")))
 
@@ -78,28 +182,9 @@ my_renamer = uppercasefirst ∘ string
 df1 = subset(df, :dance_induced => ByRow(x -> x))
 (pregrouped(df1.tθ, df1.θ => rad2deg)  * visual(Lines) + pregrouped(df1.tθ, df1.θs => rad2deg)  * visual(Lines; color = :red)) * pregrouped(layout = string.(df1.run_id, " ", df1.condition)) |> draw()
 
-fig = Figure()
-ax = Axis(fig[1,1], aspect = DataAspect(), limits = ((-100, 100), (-100, 100)))
-sl = SliderGrid(fig[2, 1], (range = 1:nrow(df), ))
-i = only(sl.sliders).value
-track1 = lift(i) do i
-    df.xy[i] .- Ref(df.xy[i][1])
-end
-track2 = lift(i) do i
-    df.xys[i]
-end
-poi = lift(i) do i
-    df.xy[i][1:df.poi_index[i]] .- Ref(df.xy[i][1])
-end
-lines!(ax, track1)
-lines!(ax, track2)
-lines!(ax, poi, color = :red)
-
-
 
 (pregrouped(df.xy => first, df.xy => last)  * visual(Lines) + pregrouped(df.xys => first, df.xys => last)  * visual(Lines; color = :red)) * pregrouped(layout = string.(df.run_id, " ", df.condition)) |> draw()
 
-data(df) * mapping(:dance_induced, :k, row = :at_run => nonnumeric) * visual(RainClouds, violin_limits = (0, Inf)) |> draw()
 
 
 sdjkhfgksdljfhsfhj
