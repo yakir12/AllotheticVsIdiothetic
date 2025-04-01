@@ -271,19 +271,19 @@ function mean_resultant_vector(θ)
 end
 
 
-function get_turn_profile(t, spl, poi_index)
-    i1 = 1#something(findfirst(≥(t[poi_index] - 2), t), length(t))
+function get_turn_profile(t, spl)
+    i1 = 5#something(findfirst(≥(t[poi_index] - 2), t), length(t))
     tθ = t[i1:end]
     θ = [atan(reverse(derivative(spl, ti))...) for ti in tθ]
-    θ₀ = θ[1]
-    θ .-= θ₀
+    # θ₀ = θ[1]
+    # θ .-= θ₀
     unwrap!(θ)
     # m, M = extrema(θ)
     # if abs(m) > M
-    if mean(θ) < 0
-        θ .*= -1
-    end
-    return (; tθ = tθ .- tθ[1], θ = θ)
+    # if mean(θ) < 0
+        # θ .*= -1
+    # end
+    return (; tθ, θ)
 end
 
 # function arclength(spl, t1, t2; kws...)
@@ -324,24 +324,22 @@ function cropto(xy, l)
     xy[1:i-1]
 end
 
+function guess_logistic(x, y)
+    ymin, ymax = extrema(y)
+    x₀i = last(findmax(log.(1 ./ abs.(y .- (ymax - ymin)/2 .- ymin))))
+    p0 = Float64[ymax - ymin, -1^(mean(y) > y[1]), x[x₀i], -ymin]
+end
+
 function fit_logistic(tθ, θ)
-    lb = [0.0, 0]
-    ub = [300.0, 2pi]
-    p0 = [0.1, pi]
+    p0 = guess_logistic(tθ, θ)
+    lb = Float64[1, -10, 0, -10]
+    ub = Float64[20, 10, 100, 10]
     fit = curve_fit(logistic, tθ, θ, p0, lower = lb, upper = ub)
     fit.param
 end
 
-function fit_logistic(tθ, θ)
-    lb = [0.0, 0, -20]
-    ub = [300.0, 5pi, 20]
-    p0 = [0.1, pi, 0]
-    fit = curve_fit(logistic, tθ, θ, p0, lower = lb, upper = ub)
-    fit.param
-end
-
-logistic(x, L, k, x₀) = L / (1 + exp(-k*(x - x₀))) - L/2
-logistic(x, p) = logistic.(x, p[2], p[1], p[3])
+logistic(x, L, k, x₀, y₀) = L / (1 + exp(-k*(x - x₀))) - y₀
+logistic(x, p) = logistic.(x, p...)
 
 
 #######################

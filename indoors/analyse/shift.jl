@@ -64,22 +64,22 @@ select!(runs, Not(:calibration_id))
     @rtransform! :condition = combine_factors(:light, :dance_induced, :at_run)
     # @rtransform! :tform = get_rotation(:xys[:poi_index])
     @rtransform! :l = get_pathlength(:xys)
-    @rtransform! $AsTable = get_turn_profile(:t, :spl, :poi_index)
-    @rtransform! :ks = fit_logistic(:tθ, :θ)
-    @rtransform! :θs = logistic.(:tθ, Ref([:ks; 0]))
+    @rtransform! $AsTable = get_turn_profile(:t, :spl)
+    @rtransform! :ks = fit_logistic(:tθ, :θ, :poi)
+    @rtransform! :θs = logistic.(:tθ, Ref(:ks))
     @transform! :k = first.(:ks)
 end
 
-function loops(xy)
-    inds, _ = self_intersections(Point2f.(xy))
-    ranges = splat(UnitRange).(Iterators.partition(inds, 2))
-    length.(ranges)
-end
-
-l = map(loops, df.xy)
-l = reduce(vcat, l)
-
-df = copy(runs)
+# function loops(xy)
+#     inds, _ = self_intersections(Point2f.(xy))
+#     ranges = splat(UnitRange).(Iterators.partition(inds, 2))
+#     length.(ranges)
+# end
+#
+# l = map(loops, df.xy)
+# l = reduce(vcat, l)
+#
+df = runs
 fig = Figure()
 ax = Axis(fig[1,1], aspect = DataAspect(), limits = ((-100, 100), (-100, 100)))
 sl = SliderGrid(fig[3, 1], (range = 1:nrow(df), ))
@@ -123,23 +123,53 @@ end
 lines!(ax1, turn1, color = :red)
 lines!(ax1, turn2, color = :green)
 scatter!(ax1, txy)
-on(turn) do t
+on(turn1) do t
     limits!(ax1, -1, first(last(t)) + 1, -90, 360)
 end
 
-
+# n = 100
+# x = range(1, 100, n)
+#
+# L = 10 # total height, from lowest to highest
+# k = -1 # slope, lower is slower
+# x₀ = 10 # x value for the midpoint
+# y₀ = -3 # y displacement
+# y = logistic(x, [L, k, x₀, y₀]) .+ 0.1randn(n)
+# lines(x, y)
+#
+# function guess_logistic(x, y)
+#     ymin, ymax = extrema(y)
+#     x₀i = last(findmax(log.(1 ./ abs.(y .- (ymax - ymin)/2 .- ymin))))
+#     p0 = Float64[ymax - ymin, -1^(mean(y) > y[1]), x[x₀i], -ymin]
+# end
+#
+# p0 = guess_logistic(x, y)
+# lb = Float64[1, -10, -100, -100]
+# ub = Float64[100, 10, 100, 100]
+# fit = curve_fit(logistic, x, y, p0, lower = lb, upper = ub)
+# yl = logistic(x, fit.param)
+# lines!(x, yl)
 
 df1 = @rsubset(runs, !(:dance_induced))
 
-(pregrouped(df1.tθ, df1.θ => rad2deg)  * visual(Lines) + pregrouped(df1.tθ, df1.θs => rad2deg)  * visual(Lines; color = :red)) * pregrouped(layout = string.(df1.run_id, " ", df1.condition)) |> draw(axis = (;limits = (nothing, (-10, 360))))
+(pregrouped(df1.tθ, df1.θ => rad2deg)  * visual(Lines) + pregrouped(df1.tθ, df1.θs => rad2deg)  * visual(Lines; color = :red)) * pregrouped(layout = string.(df1.run_id, " ", df1.condition)) |> draw(facet = (; linkxaxes = :none, linkyaxes = :none))
+
+df2 = only(eachrow(@rsubset df1 :run_id == 165))
+lines(df2.tθ, df2.θ)
+lines!(df2.tθ, df2.θs)
+
+df2.ks
+
+df3 = only(eachrow(@rsubset df1 :run_id == 93))
+df3.ks
 
 data(runs) * mapping(:dance_induced, :k, row = :at_run => nonnumeric) * visual(RainClouds, violin_limits = (0, Inf)) |> draw()
 
 
-i = 7
-df = runs[i:i, :]
-(pregrouped(df.xy => first, df.xy => last)  * visual(Lines) + pregrouped(df.xys => first, df.xys => last)  * visual(Lines; color = :red)) * pregrouped(layout = string.(df.run_id, " ", df.condition)) |> draw(figure = (;size = (1000, 1000)), axis = (;aspect = DataAspect()))
-
+# i = 7
+# df = runs[i:i, :]
+# (pregrouped(df.xy => first, df.xy => last)  * visual(Lines) + pregrouped(df.xys => first, df.xys => last)  * visual(Lines; color = :red)) * pregrouped(layout = string.(df.run_id, " ", df.condition)) |> draw(figure = (;size = (1000, 1000)), axis = (;aspect = DataAspect()))
+#
 
 
 # @chain runs begin 
@@ -153,9 +183,9 @@ sdjkfghasdklhfsdkh
 
 julia> findall(>(360), rad2deg.(last.(runs.ks)) ./ 2)
 3-element Vector{Int64}:
-  72
- 112
- 123
+72
+112
+123
 
 
 # runs.condition .= categorical(runs.condition; levels = ["remain", "dark", "dark induced", "shift", "shift induced"], ordered = true)
