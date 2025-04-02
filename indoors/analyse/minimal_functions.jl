@@ -84,7 +84,8 @@ end
 function smooth(t, xy)
     spl = ParametricSpline(t, stack(xy), k = 3, s = 50)
     xys = SV.(spl.(t))
-    xys .-= Ref(xys[1])
+    trans = Translation(-xys[1])
+    xys .= trans.(xys)
     # t1 = t[1]
     # t2 = t[end]
     # xys1 = xys[1]
@@ -99,7 +100,7 @@ function smooth(t, xy)
     #     push!(xys, xys2)
     # end
     # xys .-= Ref(xys[1])
-    return (; xys, spl)
+    return (; xys, spl, trans)
 end
 
 
@@ -243,7 +244,7 @@ end
 # end
 
 function get_rotation(p2)
-    θ = π/2 + atan(reverse(p2)...)
+    θ = π/2 - atan(reverse(p2)...)
     LinearMap(Angle2d(θ))
 end
 
@@ -271,10 +272,12 @@ function mean_resultant_vector(θ)
 end
 
 
-function get_turn_profile(t, spl)
-    i1 = 5#something(findfirst(≥(t[poi_index] - 2), t), length(t))
-    tθ = t[i1:end]
-    θ = [atan(reverse(derivative(spl, ti))...) for ti in tθ]
+function get_turn_profile(l, spl, poi_index)
+    i1 = 1#findfirst(>(poi - 8), t)
+    i2 = something(findfirst(>(l[poi_index] + 10), l), length(l)) # 10 cm after poi
+    # tθ = t[i1:i2]
+    lθ = range(l[i1], l[i2], 100)
+    θ = [atan(reverse(derivative(spl, li))...) for li in lθ]
     # θ₀ = θ[1]
     # θ .-= θ₀
     unwrap!(θ)
@@ -283,7 +286,7 @@ function get_turn_profile(t, spl)
     # if mean(θ) < 0
         # θ .*= -1
     # end
-    return (; tθ, θ)
+    return (; lθ, θ)
 end
 
 # function arclength(spl, t1, t2; kws...)
@@ -319,9 +322,15 @@ function unwrap!(x, period = 2π)
     return x
 end
 
-function cropto(xy, l)
-    i = something(findfirst(>(l) ∘ norm, xy), length(xy))
-    xy[1:i-1]
+function cropto(t, spl, trans, l)
+    i = findlast(<(l) ∘ norm ∘ trans ∘ SV ∘ spl, t)
+    t1 = t[i]
+    t2 = t[i+1]
+    fun(t) = abs2(norm(trans(SV(spl(t)))) - l)
+    res = optimize(fun, t1, t2)
+    tend = Optim.minimizer(res)
+    tl = range(t[1], tend, 100)
+    trans.(SV.(spl.(tl)))
 end
 
 function guess_logistic(x, y)
@@ -330,18 +339,32 @@ function guess_logistic(x, y)
     p0 = Float64[ymax - ymin, -1^(mean(y) > y[1]), x[x₀i], -ymin]
 end
 
-function fit_logistic(tθ, θ)
-    p0 = guess_logistic(tθ, θ)
-    lb = Float64[1, -10, 0, -10]
-    ub = Float64[20, 10, 100, 10]
-    fit = curve_fit(logistic, tθ, θ, p0, lower = lb, upper = ub)
-    fit.param
+function fit_logistic(l, θ)
+    p0 = guess_logistic(l, θ)
+    # @show p0
+    lb = Float64[0, -10, l[1], -10]
+    ub = Float64[20, 10, l[end], 10]
+    fit = curve_fit(logistic, l, θ, p0, lower = lb, upper = ub)
+    tss = sum(abs2, θ .- mean(θ))
+    (; ks = LsqFit.coef(fit), logistic_rsquare = 1 - LsqFit.rss(fit)/tss)
 end
 
 logistic(x, L, k, x₀, y₀) = L / (1 + exp(-k*(x - x₀))) - y₀
 logistic(x, p) = logistic.(x, p...)
 
-
+# """
+#     wrap2pi(angle)
+#
+# Limit the angle to the range -π .. π .
+# """
+# wrap2pi(::typeof(pi)) = π
+# function wrap2pi(angle)
+#     y = rem(angle, 2π)
+#     abs(y) > π && (y -= 2π * sign(y))
+#     return y
+# end
+wrap2pi(x::typeof(π)) = rem2pi(float(x), RoundNearest)
+wrap2pi(x) = rem2pi(x, RoundNearest)
 #######################
 
 

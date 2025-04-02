@@ -10,6 +10,7 @@ using CSV, DataFrames, CameraCalibrations
 using Interpolations, StaticArrays, Dierckx, CoordinateTransformations, Rotations
 using OhMyThreads
 using LsqFit
+using Optim
 using CategoricalArrays
 using Distributions
 using IntervalSets
@@ -62,13 +63,61 @@ select!(runs, Not(:calibration_id))
     @rtransform! $AsTable = smooth(:t, :xy)
     @rtransform! :dance_spontaneous = !ismissing(:spontaneous_end)
     @rtransform! :condition = combine_factors(:light, :dance_induced, :at_run)
-    # @rtransform! :tform = get_rotation(:xys[:poi_index])
+    @rtransform! :rot = get_rotation(:xys[:poi_index])
     @rtransform! :l = get_pathlength(:xys)
-    @rtransform! $AsTable = get_turn_profile(:t, :spl)
-    @rtransform! :ks = fit_logistic(:tθ, :θ, :poi)
-    @rtransform! :θs = logistic.(:tθ, Ref(:ks))
-    @transform! :k = first.(:ks)
+    @rtransform! $AsTable = get_turn_profile(:t, :spl, :poi_index)
+    @rtransform! $AsTable = fit_logistic(:lθ, :θ)
+    @rtransform! :θs = logistic.(:t, Ref(:ks))
+    @transform! :k = getindex.(:ks, 2)
+    @rtransform! :Δθ = abs(wrap2pi(-(reverse(extrema(:θs))...)))
+    @rtransform! :Δpoi = :ks[3] - :poi
 end
+
+################################################### 10 random tracks
+
+df = @chain runs begin
+    @subset norm.(last.(:xys)) .> 50
+    @rtransform :xys = cropto(:t, :spl, :trans, 50)
+    @rtransform :xysr = :rot.(:xys)
+    @groupby :dance_induced
+    @transform :n = 1:length(:dance_induced)
+    @subset :n .≤ 10
+end
+@assert all(==(10), combine(groupby(df, :dance_induced), nrow).nrow)
+
+fig = pregrouped(df.xys => first, df.xys => last, col = df.dance_induced => renamer(true => "Induced", false => "Not")) * visual(Lines) |> draw(; axis = (; width = 400, height = 400))
+for ax in fig.figure.content 
+    if ax isa Axis
+        for r  in (30, 50)
+            lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
+        end
+    end
+end
+save(joinpath(output, "figure4.png"), fig)
+
+fig = pregrouped(df.xysr => first, df.xysr => last, col = df.dance_induced => renamer(true => "Induced", false => "Not")) * visual(Lines) |> draw(; axis = (; width = 400, height = 400))
+for ax in fig.figure.content 
+    if ax isa Axis
+        for r  in (30, 50)
+            lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
+        end
+    end
+end
+save(joinpath(output, "figure4a.png"), fig)
+
+
+################################################### raw data for turning angles
+
+df = @chain runs begin
+    @rtransform :lθ = :lθ .- first(:lθ)
+    @rtransform :θ = :θ .- first(:θ)
+    @rtransform :θ = mean(:θ) < 0 ? -(:θ) : :θ
+end
+
+fig = pregrouped(df.lθ => "Path length (cm)", df.θ => rad2deg => "Turning", col = df.dance_induced => renamer(true => "Induced", false => "Not")) * visual(Lines) |> draw(; axis = (; width = 400, height = 400, ytickformat = "{:n}°", yticks = 0:90:270, limits = ((nothing, 10), (-80, nothing))))
+
+save(joinpath(output, "figure5.png"), fig)
+
 
 # function loops(xy)
 #     inds, _ = self_intersections(Point2f.(xy))
@@ -78,54 +127,54 @@ end
 #
 # l = map(loops, df.xy)
 # l = reduce(vcat, l)
-#
-df = runs
-fig = Figure()
-ax = Axis(fig[1,1], aspect = DataAspect(), limits = ((-100, 100), (-100, 100)))
-sl = SliderGrid(fig[3, 1], (range = 1:nrow(df), ))
-i = only(sl.sliders).value
-poi1 = lift(i) do i
-    df.xy[i][1:df.poi_index[i]]
-end
-poi2 = lift(i) do i
-    df.xys[i][1:df.poi_index[i]]
-end
-tra1 = lift(i) do i
-    df.xy[i][df.poi_index[i]:end]
-end
-tra2 = lift(i) do i
-    df.xys[i][df.poi_index[i]:end]
-end
-sl = SliderGrid(fig[4, 1], (range = 1:minimum(length, df.t), ))
-j = only(sl.sliders).value
-xy1 = lift(i, j) do i, j
-    df.xy[i][j]
-end
-xy2 = lift(i, j) do i, j
-    df.xys[i][j]
-end
-lines!(ax, poi1, color = :black)
-lines!(ax, poi2, color = :red)
-lines!(ax, tra1, color = :blue)
-lines!(ax, tra2, color = :green)
-scatter!(ax, xy1)
-scatter!(ax, xy2)
-ax1 = Axis(fig[2,1], limits = (nothing, (-90, 360)), yticks = -90:90:360)
-turn1 = lift(i) do i
-    Point2f.(df.tθ[i][1:df.poi_index[i]], rad2deg.(df.θ[i][1:df.poi_index[i]]))
-end
-turn2 = lift(i) do i
-    Point2f.(df.tθ[i][df.poi_index[i]:end], rad2deg.(df.θ[i][df.poi_index[i]:end]))
-end
-txy = lift(i, j) do i, j
-    Point2f(df.tθ[i][j], rad2deg(df.θ[i][j]))
-end
-lines!(ax1, turn1, color = :red)
-lines!(ax1, turn2, color = :green)
-scatter!(ax1, txy)
-on(turn1) do t
-    limits!(ax1, -1, first(last(t)) + 1, -90, 360)
-end
+
+# df = runs
+# fig = Figure()
+# ax = Axis(fig[1,1], aspect = DataAspect(), limits = ((-100, 100), (-100, 100)))
+# sl = SliderGrid(fig[3, 1], (range = 1:nrow(df), ))
+# i = only(sl.sliders).value
+# poi1 = lift(i) do i
+#     df.xy[i][1:df.poi_index[i]]
+# end
+# poi2 = lift(i) do i
+#     df.xys[i][1:df.poi_index[i]]
+# end
+# tra1 = lift(i) do i
+#     df.xy[i][df.poi_index[i]:end]
+# end
+# tra2 = lift(i) do i
+#     df.xys[i][df.poi_index[i]:end]
+# end
+# sl = SliderGrid(fig[4, 1], (range = 1:minimum(length, df.t), ))
+# j = only(sl.sliders).value
+# xy1 = lift(i, j) do i, j
+#     df.xy[i][j]
+# end
+# xy2 = lift(i, j) do i, j
+#     df.xys[i][j]
+# end
+# lines!(ax, poi1, color = :black)
+# lines!(ax, poi2, color = :red)
+# lines!(ax, tra1, color = :blue)
+# lines!(ax, tra2, color = :green)
+# scatter!(ax, xy1)
+# scatter!(ax, xy2)
+# ax1 = Axis(fig[2,1], limits = (nothing, (-90, 360)), yticks = -90:90:360)
+# turn1 = lift(i) do i
+#     Point2f.(df.tθ[i][1:df.poi_index[i]], rad2deg.(df.θ[i][1:df.poi_index[i]]))
+# end
+# turn2 = lift(i) do i
+#     Point2f.(df.tθ[i][df.poi_index[i]:end], rad2deg.(df.θ[i][df.poi_index[i]:end]))
+# end
+# txy = lift(i, j) do i, j
+#     Point2f(df.tθ[i][j], rad2deg(df.θ[i][j]))
+# end
+# lines!(ax1, turn1, color = :red)
+# lines!(ax1, turn2, color = :green)
+# scatter!(ax1, txy)
+# on(turn1) do t
+#     limits!(ax1, -1, first(last(t)) + 1, -90, 360)
+# end
 
 # n = 100
 # x = range(1, 100, n)
@@ -137,12 +186,6 @@ end
 # y = logistic(x, [L, k, x₀, y₀]) .+ 0.1randn(n)
 # lines(x, y)
 #
-# function guess_logistic(x, y)
-#     ymin, ymax = extrema(y)
-#     x₀i = last(findmax(log.(1 ./ abs.(y .- (ymax - ymin)/2 .- ymin))))
-#     p0 = Float64[ymax - ymin, -1^(mean(y) > y[1]), x[x₀i], -ymin]
-# end
-#
 # p0 = guess_logistic(x, y)
 # lb = Float64[1, -10, -100, -100]
 # ub = Float64[100, 10, 100, 100]
@@ -150,20 +193,35 @@ end
 # yl = logistic(x, fit.param)
 # lines!(x, yl)
 
-df1 = @rsubset(runs, !(:dance_induced))
+df1 = @rsubset(runs, (:dance_induced))
+# @rtransform! df1 :tθ =  :tθ .- first(:tθ)
 
-(pregrouped(df1.tθ, df1.θ => rad2deg)  * visual(Lines) + pregrouped(df1.tθ, df1.θs => rad2deg)  * visual(Lines; color = :red)) * pregrouped(layout = string.(df1.run_id, " ", df1.condition)) |> draw(facet = (; linkxaxes = :none, linkyaxes = :none))
+fig = (pregrouped(df1.tθ, df1.θ => rad2deg)  * visual(Lines) + pregrouped(df1.t, df1.θs => rad2deg)  * visual(Lines; color = :red)) * pregrouped(layout = string.(df1.run_id, " ", round.(df1.k, digits = 4))) |> draw(axis = (; yticks = -360:180:360), facet = (; linkxaxes = :none, linkyaxes = :all))
+# display(fig)
 
-df2 = only(eachrow(@rsubset df1 :run_id == 165))
-lines(df2.tθ, df2.θ)
-lines!(df2.tθ, df2.θs)
+fig = pregrouped([ts .- first(ts) for ts in runs.t], runs.θs => rad2deg, col = runs.dance_induced)  * visual(Lines) * pregrouped(group = string.(runs.run_id, " ", round.(runs.k, digits = 4))) |> draw(axis = (; yticks = -360:180:360))
 
-df2.ks
+fig = data(runs) * mapping(:Δθ => rad2deg, :k => abs, color = :dance_induced, marker = :dance_induced) * visual(Scatter) |> draw()
+display(fig)
 
-df3 = only(eachrow(@rsubset df1 :run_id == 93))
-df3.ks
+data(runs) * mapping(:logistic_rsquare, :k => abs) * visual(Scatter; color = :red, strokecolor = :black, strokewidth = 1) |> draw()
 
-data(runs) * mapping(:dance_induced, :k, row = :at_run => nonnumeric) * visual(RainClouds, violin_limits = (0, Inf)) |> draw()
+
+data(runs) * mapping(:Δθ => abs ∘ rad2deg, :k => abs) * visual(Scatter; color = :red, strokecolor = :black, strokewidth = 1) |> draw()
+
+
+# df2 = only(eachrow(@rsubset df1 :run_id == 165))
+# lines(df2.tθ, df2.θ)
+# lines!(df2.tθ, df2.θs)
+#
+# df2.ks
+#
+# df3 = only(eachrow(@rsubset df1 :run_id == 93))
+# df3.ks
+
+data(runs) * mapping(:dance_induced, :k => abs, row = :at_run => nonnumeric) * visual(RainClouds, violin_limits = (0, Inf)) |> draw()
+
+data(runs) * mapping(:dance_induced, :Δpoi => abs, row = :at_run => nonnumeric) * visual(RainClouds, violin_limits = (0, Inf)) |> draw()
 
 
 # i = 7
@@ -178,14 +236,15 @@ data(runs) * mapping(:dance_induced, :k, row = :at_run => nonnumeric) * visual(R
 # end
 
 
+# x figure: 10 raw tracks: original direction
+# x figure: 10 raw tracks: pointing to same direction
+# x switch time to path length
+# x figure: raw data for the turning angles
+# - run glm (Gamma) with weights from the r square -> figure
+# - maybe test variance differences on Δθ
 
 sdjkfghasdklhfsdkh
 
-julia> findall(>(360), rad2deg.(last.(runs.ks)) ./ 2)
-3-element Vector{Int64}:
-72
-112
-123
 
 
 # runs.condition .= categorical(runs.condition; levels = ["remain", "dark", "dark induced", "shift", "shift induced"], ordered = true)
@@ -328,22 +387,6 @@ combine(groupby(df, :condition), nrow).nrow
 
 ######################## Figure 1
 
-df1 = subset(df, :xys => ByRow(≥(50) ∘ norm ∘ last))
-transform!(df1, :xys => ByRow(xy -> cropto(xy, 50)) => :xys)
-transform!(groupby(df1, :condition), eachindex => :n)
-subset!(df1, :n => ByRow(≤(10)))
-@assert all(==(10), combine(groupby(df1, :condition), nrow).nrow)
-
-fig = pregrouped(df1.xys => first, df1.xys => last, col = df1.condition => my_renamer) * visual(Lines) |> draw(; figure = (; size = (1200, 400)), axis=(aspect=DataAspect(), ))
-for ax in fig.figure.content 
-    if ax isa Axis
-        for r  in (30, 50)
-            lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
-        end
-    end
-end
-
-save(joinpath(output, "figure4.png"), fig)
 
 
 ######################## Figure 2
