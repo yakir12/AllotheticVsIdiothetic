@@ -1,4 +1,5 @@
 using AlgebraOfGraphics, GLMakie, CairoMakie
+using GLM
 
 using DataFramesMeta, Chain
 using HypothesisTests
@@ -32,15 +33,19 @@ function combine_factors(light, induced, run)
     string(light, induced, run)
 end
 
-runs = CSV.read(joinpath(results_dir, "runs.csv"), DataFrame)
-@rsubset!(runs, :light == "shift")
-select!(runs, Not(:runs_path, :start_location, :fps, :target_width, :runs_file, :window_size))
-calibs = CSV.read(joinpath(results_dir, "calibs.csv"), DataFrame)
-transform!(calibs, :calibration_id => ByRow(get_calibration) => :rectify)
-select!(calibs, Cols(:calibration_id, :rectify))
+runs = @chain joinpath(results_dir, "runs.csv") begin
+    CSV.read(DataFrame)
+    @subset :light .== "shift"
+    @select Not(:runs_path, :start_location, :fps, :target_width, :runs_file, :window_size)
+end
+calibs = @chain joinpath(results_dir, "calibs.csv") begin
+    CSV.read(DataFrame)
+    @transform :rectify = get_calibration.(:calibration_id)
+    @select Cols(:calibration_id, :rectify)
+end
 leftjoin!(runs, calibs, on = :calibration_id)
-select!(runs, Not(:calibration_id))
 @chain runs begin
+    @select! Not(:calibration_id)
     @rename! :intervention = :poi
     @rtransform! $AsTable = get_tij(:tij_file)
     @rtransform! $AsTable = remove_stops!(:t, :ij)
@@ -64,14 +69,15 @@ select!(runs, Not(:calibration_id))
     @rtransform! :dance_spontaneous = !ismissing(:spontaneous_end)
     @rtransform! :condition = combine_factors(:light, :dance_induced, :at_run)
     @rtransform! :rot = get_rotation(:xys[:poi_index])
-    @rtransform! :l = get_pathlength(:xys)
-    @rtransform! $AsTable = get_turn_profile(:t, :spl, :poi_index)
+    @rtransform! $AsTable = get_turn_profile(:t, :spl, :poi)
     @rtransform! $AsTable = fit_logistic(:lθ, :θ)
-    @rtransform! :θs = logistic.(:t, Ref(:ks))
-    @transform! :k = getindex.(:ks, 2)
-    @rtransform! :Δθ = abs(wrap2pi(-(reverse(extrema(:θs))...)))
-    @rtransform! :Δpoi = :ks[3] - :poi
+    @rtransform! :θs = logistic.(:lθ, Ref(:ks))
+    transform!(:ks => ByRow(identity) => [:L, :k, :x₀, :y₀])
 end
+
+(pregrouped(map(x -> fill(x, 2), runs.lpoi), fill([-360, 360], nrow(runs)))  * visual(Lines; color = :green) + pregrouped(runs.lθ, runs.θ => rad2deg)  * visual(Lines) + pregrouped(runs.lθ, runs.θs => rad2deg)  * visual(Lines; color = :red)) * pregrouped(layout = runs.run_id => nonnumeric) |> draw(facet = (; linkxaxes = :none, linkyaxes = :all)) |> display
+
+jksdhgfkjsfgska
 
 ################################################### 10 random tracks
 
@@ -85,7 +91,7 @@ df = @chain runs begin
 end
 @assert all(==(10), combine(groupby(df, :dance_induced), nrow).nrow)
 
-fig = pregrouped(df.xys => first, df.xys => last, col = df.dance_induced => renamer(true => "Induced", false => "Not")) * visual(Lines) |> draw(; axis = (; width = 400, height = 400))
+fig = pregrouped(df.xys => first => "X (cm)", df.xys => last => "Y (cm)", col = df.dance_induced => renamer(true => "Induced", false => "Not")) * visual(Lines) |> draw(; axis = (; width = 400, height = 400))
 for ax in fig.figure.content 
     if ax isa Axis
         for r  in (30, 50)
@@ -95,7 +101,7 @@ for ax in fig.figure.content
 end
 save(joinpath(output, "figure4.png"), fig)
 
-fig = pregrouped(df.xysr => first, df.xysr => last, col = df.dance_induced => renamer(true => "Induced", false => "Not")) * visual(Lines) |> draw(; axis = (; width = 400, height = 400))
+fig = pregrouped(df.xysr => first => "X (cm)", df.xysr => last => "Y (cm)", col = df.dance_induced => renamer(true => "Induced", false => "Not")) * visual(Lines) |> draw(; axis = (; width = 400, height = 400))
 for ax in fig.figure.content 
     if ax isa Axis
         for r  in (30, 50)
@@ -108,15 +114,47 @@ save(joinpath(output, "figure4a.png"), fig)
 
 ################################################### raw data for turning angles
 
+norm_logistic(y, L, k, y₀) = sign(k)*((y + y₀) / L - 0.5)*abs(L - y₀)
 df = @chain runs begin
-    @rtransform :lθ = :lθ .- first(:lθ)
-    @rtransform :θ = :θ .- first(:θ)
-    @rtransform :θ = mean(:θ) < 0 ? -(:θ) : :θ
+    @select :lθ :θ :dance_induced :x₀ :y₀ :k :L :θs :run_id
+    @rtransform :lθshifted = :lθ .- :x₀
+    @rtransform :θnormalized = norm_logistic.(:θ, :L, :k, :y₀)
 end
 
-fig = pregrouped(df.lθ => "Path length (cm)", df.θ => rad2deg => "Turning", col = df.dance_induced => renamer(true => "Induced", false => "Not")) * visual(Lines) |> draw(; axis = (; width = 400, height = 400, ytickformat = "{:n}°", yticks = 0:90:270, limits = ((nothing, 10), (-80, nothing))))
+fig = pregrouped(df.lθshifted => "Path length (cm)", df.θnormalized => rad2deg => "Turning", col = df.dance_induced => renamer(true => "Induced", false => "Not")) * visual(Lines) |> draw(; axis = (; width = 400, height = 400, ytickformat = "{:n}°", yticks = -180:90:180, limits = ((-11, 11), nothing)))
+
+
+fig = (pregrouped(df.lθ, df.θ => rad2deg)  * visual(Lines) + pregrouped(df.lθ, df.θs => rad2deg)  * visual(Lines; color = :red)) * pregrouped(layout = df.run_id => nonnumeric) |> draw(axis = (; yticks = -360:180:360), facet = (; linkxaxes = :none, linkyaxes = :none))
+
+
+fig = (pregrouped(df.lθ, df.θ => rad2deg) * visual(Lines; label = "data") + pregrouped(df.lθ => "Path length (cm)", df.θs => rad2deg => "Turning") * visual(Lines; color = :red, label = "fit")) * mapping(col = df.dance_induced => renamer(true => "Induced", false => "Not")) |> draw(; axis = (; width = 400, height = 400))#, ytickformat = "{:n}°", yticks = 0:90:270, limits = ((-5, 5), (-80, nothing))))
+
 
 save(joinpath(output, "figure5.png"), fig)
+
+
+################################################### GLM for turning
+
+# m = glm(@formula(k ~ dance_induced*at_run), runs, Gamma())
+# m = glm(@formula(k ~ dance_induced + at_run), runs, Gamma())
+
+m = glm(@formula(abs(k) ~ dance_induced), runs, Gamma())
+
+predictions = DataFrame(dance_induced = [true, false])
+predictions = hcat(predictions, predict(m, predictions; interval = :confidence))
+l = range(-10, 10, 100)
+predictions = @chain predictions begin
+    @rtransform :μ = logistic.(l, 360, :prediction, 0, 180)
+    @rtransform :lower = logistic.(l, 360, :lower, 0, 180)
+    @rtransform :upper = logistic.(l, 360, :upper, 0, 180)
+    @rtransform :l = l
+    flatten([:l, :μ, :lower, :upper])
+end
+
+
+fig = (pregrouped(df.lθshifted => "Path length (cm)", df.θnormalized => rad2deg => "Turning", col = df.dance_induced => renamer(true => "Induced", false => "Not")) * visual(Lines) + data(predictions) * mapping(:l => "Path length (cm)", :μ => "Turning", col = :dance_induced => renamer(true => "Induced", false => "Not") => "Induced", lower = :lower, upper = :upper) * visual(LinesFill; color = :red)) |> draw(; axis = (; width = 400, height = 400, ytickformat = "{:n}°", yticks = -180:90:180, limits = ((-11, 11), nothing)))
+
+sdkjhksdlhjflsdhjfslkfjhlaksdhflhsla
 
 
 # function loops(xy)

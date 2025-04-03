@@ -272,21 +272,18 @@ function mean_resultant_vector(θ)
 end
 
 
-function get_turn_profile(l, spl, poi_index)
-    i1 = 1#findfirst(>(poi - 8), t)
-    i2 = something(findfirst(>(l[poi_index] + 10), l), length(l)) # 10 cm after poi
-    # tθ = t[i1:i2]
-    lθ = range(l[i1], l[i2], 100)
-    θ = [atan(reverse(derivative(spl, li))...) for li in lθ]
-    # θ₀ = θ[1]
-    # θ .-= θ₀
+function get_turn_profile(t, spl, poi)
+    n = 1000
+    tl = range(t[1], t[end], n)
+    poi_index = findfirst(≥(poi), tl)
+    l = get_pathlength(SV.(spl.(tl)))
+    l1 = l[poi_index] - 10 # 5 cm beofe the poi
+    i1 = findfirst(≥(l1), l)
+    l2 = l[poi_index] + 10 # 5 cm beofe the poi
+    i2 = something(findfirst(≥(l2), l), n)
+    θ = [atan(reverse(derivative(spl, tl[i]))...) for i in i1:i2]
     unwrap!(θ)
-    # m, M = extrema(θ)
-    # if abs(m) > M
-    # if mean(θ) < 0
-        # θ .*= -1
-    # end
-    return (; lθ, θ)
+    return (; lpoi = l[poi_index], lθ = l[i1:i2], θ)
 end
 
 # function arclength(spl, t1, t2; kws...)
@@ -342,7 +339,7 @@ end
 function fit_logistic(l, θ)
     p0 = guess_logistic(l, θ)
     # @show p0
-    lb = Float64[0, -10, l[1], -10]
+    lb = Float64[0, -10, l[1], 0]
     ub = Float64[20, 10, l[end], 10]
     fit = curve_fit(logistic, l, θ, p0, lower = lb, upper = ub)
     tss = sum(abs2, θ .- mean(θ))
@@ -351,6 +348,10 @@ end
 
 logistic(x, L, k, x₀, y₀) = L / (1 + exp(-k*(x - x₀))) - y₀
 logistic(x, p) = logistic.(x, p...)
+
+inv_logistic(y, L, k, x₀, y₀) = log(L/(y + y₀) - 1) / (-k) + x₀
+
+norm_logistic(y, L, k, y₀) = sign(k)*((y + y₀) / L - 0.5) + 0.5
 
 # """
 #     wrap2pi(angle)
