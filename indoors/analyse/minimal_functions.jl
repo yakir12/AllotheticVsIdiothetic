@@ -76,13 +76,15 @@ end
 
 function sparseify(t, xy, poi)
     spl = ParametricSpline(t, stack(xy))
-    tl = round(Int, t[1]):round(Int, t[end])
-    poi_index = findfirst(==(round(Int, poi)), tl)
+    # tl = round(Int, t[1]):round(Int, t[end])
+    tl = range(t[1], t[end], step = 0.5)
+    # poi_index = findfirst(==(round(Int, poi)), tl)
+    poi_index = findfirst(≥(poi), tl)
     (; t = tl, xy = SV.(spl.(tl)), poi_index)
 end
 
 function smooth(t, xy)
-    spl = ParametricSpline(t, stack(xy), k = 3, s = 50)
+    spl = ParametricSpline(t, stack(xy), k = 3, s = 25)
     xys = SV.(spl.(t))
     trans = Translation(-xys[1])
     xys .= trans.(xys)
@@ -277,13 +279,16 @@ function get_turn_profile(t, spl, poi)
     tl = range(t[1], t[end], n)
     poi_index = findfirst(≥(poi), tl)
     l = get_pathlength(SV.(spl.(tl)))
-    l1 = l[poi_index] - 10 # 5 cm beofe the poi
+    l1 = l[poi_index] - 5 # 5 cm beofe the poi
     i1 = findfirst(≥(l1), l)
-    l2 = l[poi_index] + 10 # 5 cm beofe the poi
+    l2 = l[poi_index] + 20 # 5 cm beofe the poi
     i2 = something(findfirst(≥(l2), l), n)
     θ = [atan(reverse(derivative(spl, tl[i]))...) for i in i1:i2]
     unwrap!(θ)
-    return (; lpoi = l[poi_index], lθ = l[i1:i2], θ)
+    lpoi = l[poi_index]
+    lθ = l[i1:i2]
+    lpoi_index = findfirst(≥(lpoi), lθ)
+    return (; lpoi_index, lpoi, lθ, θ)
 end
 
 # function arclength(spl, t1, t2; kws...)
@@ -339,8 +344,8 @@ end
 function fit_logistic(l, θ)
     p0 = guess_logistic(l, θ)
     # @show p0
-    lb = Float64[0, -10, l[1], 0]
-    ub = Float64[20, 10, l[end], 10]
+    lb = Float64[0, -10, l[1], -20]
+    ub = Float64[20, 10, l[end], 20]
     fit = curve_fit(logistic, l, θ, p0, lower = lb, upper = ub)
     tss = sum(abs2, θ .- mean(θ))
     (; ks = LsqFit.coef(fit), logistic_rsquare = 1 - LsqFit.rss(fit)/tss)

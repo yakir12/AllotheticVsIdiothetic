@@ -71,13 +71,34 @@ leftjoin!(runs, calibs, on = :calibration_id)
     @rtransform! :rot = get_rotation(:xys[:poi_index])
     @rtransform! $AsTable = get_turn_profile(:t, :spl, :poi)
     @rtransform! $AsTable = fit_logistic(:lθ, :θ)
-    @rtransform! :θs = logistic.(:lθ, Ref(:ks))
     transform!(:ks => ByRow(identity) => [:L, :k, :x₀, :y₀])
+    @rtransform! :θs = logistic.(:lθ, :L, :k, :x₀, :y₀)
 end
 
-(pregrouped(map(x -> fill(x, 2), runs.lpoi), fill([-360, 360], nrow(runs)))  * visual(Lines; color = :green) + pregrouped(runs.lθ, runs.θ => rad2deg)  * visual(Lines) + pregrouped(runs.lθ, runs.θs => rad2deg)  * visual(Lines; color = :red)) * pregrouped(layout = runs.run_id => nonnumeric) |> draw(facet = (; linkxaxes = :none, linkyaxes = :all)) |> display
+CairoMakie.activate!()
+path = "tmp"
+mkpath(path)
+rm.(readdir(path, join = true))
+Threads.@threads for row in eachrow(runs)
+    run_id, xy, xys, poi_index, lθ, θ, θs, lpoi, lpoi_index, dance_induced = (row.run_id, row.xy, row.xys, row.poi_index, row.lθ, row.θ, row.θs, row.lpoi, row.lpoi_index, row.dance_induced)
+    fig = Figure()
+    ax = Axis(fig[1,1], aspect = DataAspect(), title = string(dance_induced, " ", round(Int, rad2deg(row.L)), "°"))
+    lines!(ax, xy[1:poi_index], color = :black)
+    lines!(ax, xy[poi_index:end], color = :gray)
+    lines!(ax, xys[1:poi_index], color = :red)
+    lines!(ax, xys[poi_index:end], color = :orange)
+    ax = Axis(fig[1,2])
+    lines!(ax, lθ[1:lpoi_index], rad2deg.(θ[1:lpoi_index]), color = :black)
+    lines!(ax, lθ[lpoi_index:end], rad2deg.(θ[lpoi_index:end]), color = :gray)
+    lines!(ax, lθ[1:lpoi_index], rad2deg.(θs[1:lpoi_index]), color = :red)
+    lines!(ax, lθ[lpoi_index:end], rad2deg.(θs[lpoi_index:end]), color = :orange)
+    save(joinpath(path, "$(run_id).png"), fig)
+end
+GLMakie.activate!()
 
-jksdhgfkjsfgska
+# (pregrouped(map(x -> fill(x, 2), runs.lpoi), fill([-360, 360], nrow(runs)))  * visual(Lines; color = :green) + pregrouped(runs.lθ, runs.θ => rad2deg)  * visual(Lines) + pregrouped(runs.lθ, runs.θs => rad2deg)  * visual(Lines; color = :red)) * pregrouped(layout = runs.run_id => nonnumeric) |> draw(facet = (; linkxaxes = :none, linkyaxes = :all)) |> display
+
+
 
 ################################################### 10 random tracks
 
@@ -114,23 +135,35 @@ save(joinpath(output, "figure4a.png"), fig)
 
 ################################################### raw data for turning angles
 
-norm_logistic(y, L, k, y₀) = sign(k)*((y + y₀) / L - 0.5)*abs(L - y₀)
+
+fix the angles and arrows here
+and see if changing the max lθ makes a huge difference
 df = @chain runs begin
-    @select :lθ :θ :dance_induced :x₀ :y₀ :k :L :θs :run_id
-    @rtransform :lθshifted = :lθ .- :x₀
-    @rtransform :θnormalized = norm_logistic.(:θ, :L, :k, :y₀)
+    @subset :logistic_rsquare .> 0.95
+    @transform :Δθ = :L .- π/2
+    transform(:L => ByRow(l -> sincos(l .- π/2)) => [:v, :u])
+    @transform :Δl = (:x₀ .- :lpoi)
+    @transform :absk = abs.(:k)
 end
 
-fig = pregrouped(df.lθshifted => "Path length (cm)", df.θnormalized => rad2deg => "Turning", col = df.dance_induced => renamer(true => "Induced", false => "Not")) * visual(Lines) |> draw(; axis = (; width = 400, height = 400, ytickformat = "{:n}°", yticks = -180:90:180, limits = ((-11, 11), nothing)))
 
-
-fig = (pregrouped(df.lθ, df.θ => rad2deg)  * visual(Lines) + pregrouped(df.lθ, df.θs => rad2deg)  * visual(Lines; color = :red)) * pregrouped(layout = df.run_id => nonnumeric) |> draw(axis = (; yticks = -360:180:360), facet = (; linkxaxes = :none, linkyaxes = :none))
-
-
-fig = (pregrouped(df.lθ, df.θ => rad2deg) * visual(Lines; label = "data") + pregrouped(df.lθ => "Path length (cm)", df.θs => rad2deg => "Turning") * visual(Lines; color = :red, label = "fit")) * mapping(col = df.dance_induced => renamer(true => "Induced", false => "Not")) |> draw(; axis = (; width = 400, height = 400))#, ytickformat = "{:n}°", yticks = 0:90:270, limits = ((-5, 5), (-80, nothing))))
-
+data(df) * mapping(:Δl => "Distance from POI (path length cm)", :absk => "k", :u, :v, col = :dance_induced => renamer(false => "Not", true => "Induced"), row = :at_run => nonnumeric, color = :Δθ => rad2deg => "Total turn") * visual(Arrows) |> draw(scales(Color = (; colormap = :cyclic_wrwbw_40_90_c42_n256_s25, colorrange = (-180, 180))); axis = (; width = 400, height = 400), colorbar = (; ticks = -180:90:180, tickformat = "{:n}°"))
 
 save(joinpath(output, "figure5.png"), fig)
+
+@chain df begin
+    @rtransform! :lθshifted = :lθ .- :lpoi # .- :x₀
+    @rtransform! :θnormalized = :θ .- :θ[:lpoi_index]#:k < 0 ? :θ .+ :y₀ .- π : :θ .+ :y₀
+end
+fig = pregrouped(df.lθshifted => "Distance from POI (path length cm)", df.θnormalized => rad2deg) * visual(Lines) * mapping(col = df.dance_induced => renamer(false => "Not", true => "Induced"), row = df.at_run => nonnumeric) |> draw()#; axis = (; width = 400, height = 400, ytickformat = "{:n}°", yticks = -180:90:270, limits = ((-5, 5), nothing)))
+
+save(joinpath(output, "figure6.png"), fig)
+
+sdkujifghlkqsdfghjklshsfg
+
+fig = (pregrouped(df.lθ, df.θ=> rad2deg) * visual(Lines; label = "data") + pregrouped(df.lθ=> "Path length (cm)", df.θs=> rad2deg => "Turning") * visual(Lines; color = :red, label = "fit")) * mapping(col = df.dance_induced => renamer(true => "Induced", false => "Not")) |> draw()#; axis = (; width = 400, height = 400, ytickformat = "{:n}°", yticks = 0:90:270, limits = ((-5, 5), nothing)))
+
+
 
 
 ################################################### GLM for turning
@@ -138,7 +171,7 @@ save(joinpath(output, "figure5.png"), fig)
 # m = glm(@formula(k ~ dance_induced*at_run), runs, Gamma())
 # m = glm(@formula(k ~ dance_induced + at_run), runs, Gamma())
 
-m = glm(@formula(abs(k) ~ dance_induced), runs, Gamma())
+m = glm(@formula(abs(k) ~ dance_induced), df, Gamma())
 
 predictions = DataFrame(dance_induced = [true, false])
 predictions = hcat(predictions, predict(m, predictions; interval = :confidence))
