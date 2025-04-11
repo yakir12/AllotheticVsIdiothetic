@@ -1,5 +1,6 @@
 using AlgebraOfGraphics, GLMakie, CairoMakie
 using GLM
+# using MultivariateStats
 
 using DataFramesMeta, Chain
 using HypothesisTests
@@ -36,6 +37,7 @@ end
 runs = @chain joinpath(results_dir, "runs.csv") begin
     CSV.read(DataFrame)
     @subset :light .== "shift"
+    @transform :dance_induced = :dance_by .== "disrupt"
     @select Not(:runs_path, :start_location, :fps, :target_width, :runs_file, :window_size)
 end
 calibs = @chain joinpath(results_dir, "calibs.csv") begin
@@ -73,6 +75,7 @@ leftjoin!(runs, calibs, on = :calibration_id)
     @rtransform! $AsTable = fit_logistic(:lθ, :θ)
     transform!(:ks => ByRow(identity) => [:L, :k, :x₀, :y₀])
     @rtransform! :θs = logistic.(:lθ, :L, :k, :x₀, :y₀)
+    @transform :y2025 = Year.(:start_datetime) .== 2025
 end
 
 ############ plot the tyracks to check validity
@@ -149,16 +152,16 @@ fig = data(df) * mapping(:Δl => "Distance from POI (path length cm)", :absk => 
 
 save(joinpath(output, "figure5.png"), fig)
 
-# PCA
+# # PCA
 @chain df begin
     @transform! :Δθnormalized = (π .- abs.(:Δθ)) ./ π 
     @transform! :kabs = abs.(:k)
     @transform! :Δlabs = abs.(:Δl)
 end
-
-Xtr = Matrix(select(df, :Δθnormalized, :kabs, :Δlabs))
-M = MultivariateStats.fit(PCA, Xtr; maxoutdim=3)
-data((; at_run = df.at_run, dance_induced = df.dance_induced, pc1 = first(eachcol(M.proj)), pc2 = last(eachcol(M.proj)))) * mapping(:pc1, :pc2, col = :dance_induced, row = :at_run => nonnumeric) * visual(Scatter) |> draw()
+#
+# Xtr = Matrix(select(df, :Δθnormalized, :kabs, :Δlabs))
+# M = MultivariateStats.fit(PCA, Xtr; maxoutdim=3)
+# data((; at_run = df.at_run, dance_induced = df.dance_induced, pc1 = first(eachcol(M.proj)), pc2 = last(eachcol(M.proj)))) * mapping(:pc1, :pc2, col = :dance_induced, row = :at_run => nonnumeric) * visual(Scatter) |> draw()
 
 
 
