@@ -1,0 +1,24 @@
+[deps]
+CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
+CameraCalibrations = "70c3cbac-2c23-4b2d-966c-5a25c0a540fb"
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+Fromage = "f7d2997e-1be8-4771-a487-05d70e6e0672"
+GLMakie = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
+ImageIO = "82e4d734-157c-48bb-816b-45c225c6df19"
+PawsomeTracker = "d3f98fa6-545d-4d4c-aa39-0a9eb18c40ca"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+
+[preferences.Fromage]
+blur = 1
+calibs_path = "."
+calibs_start = 0
+calibs_stop = 86399.999
+checker_size = 4
+n_corners = "(5, 8)"
+results_dir = "tracks and calibrations"
+runs_path = "."
+runs_start = 0
+runs_stop = 86399.999
+target_width = 60
+temporal_step = 2.0
+with_distortion = true
