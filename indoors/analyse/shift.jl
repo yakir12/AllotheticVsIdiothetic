@@ -5,7 +5,6 @@ using GLM
 using DataFramesMeta, Chain
 using HypothesisTests
 using GeometryBasics
-
 # using StatsBase, Graphs
 using Dates, LinearAlgebra, Statistics, Random
 using CSV, DataFrames, CameraCalibrations
@@ -24,7 +23,11 @@ GLMakie.activate!()
 include("minimal_functions.jl")
 
 output = "figures"
-mkpath("figures")
+if isdir(output)
+    rm.(readdir(output; join = true))
+else
+    mkdir("figures")
+end
 
 const results_dir = "../track_calibrate/tracks and calibrations"
 
@@ -34,12 +37,19 @@ function combine_factors(light, induced, run)
     string(light, induced, run)
 end
 
+function convert_dance_by_to_binary(dance_by)
+    dance_by == "disrupt" && return true
+    dance_by == "no" && return false
+    error("third dance_by option: $dance_by")
+end
+
 runs = @chain joinpath(results_dir, "runs.csv") begin
     CSV.read(DataFrame)
     @subset :light .== "shift"
-    @transform :dance_induced = :dance_by .== "disrupt"
+    @transform :dance_induced = convert_dance_by_to_binary.(:dance_by)
     @select Not(:runs_path, :start_location, :fps, :target_width, :runs_file, :window_size)
 end
+
 calibs = @chain joinpath(results_dir, "calibs.csv") begin
     CSV.read(DataFrame)
     @transform :rectify = get_calibration.(:calibration_id)
@@ -57,12 +67,13 @@ leftjoin!(runs, calibs, on = :calibration_id)
         # @aside pregrouped(_.xy => first, _.xy => last)  * visual(Lines) * pregrouped(layout = _.run_id => nonnumeric) |> draw(figure = (;size = (1000, 1000)), axis = (;aspect = DataAspect())) |> save("before.png")
         @rtransform! :jump = glue_intervention!(:xy, :t, :intervention)
     end
-    @aside @chain _ begin 
-        @subset(:light .== "remain"; view = true)
-        @rtransform! :poi = impute_poi_time(:t, :xy)
-    end
+    # @aside @chain _ begin 
+    #     @subset(:light .== "remain"; view = true)
+    #     @rtransform! :poi = impute_poi_time(:t, :xy)
+    # end
     @rtransform! :spontaneous_end = passmissing(tosecond)(:spontaneous_end)
-    @rtransform! :poi = coalesce(:spontaneous_end, :intervention, :poi)
+    # @rtransform! :poi = coalesce(:spontaneous_end, :intervention, :poi)
+    @rtransform! :poi = coalesce(:spontaneous_end, :intervention)
     disallowmissing!(:poi)
     @rtransform! :poi_index = something(findfirst(≥(:poi), :t), length(:t))
     @rtransform! $AsTable = remove_loops!(:t, :xy)
@@ -75,7 +86,7 @@ leftjoin!(runs, calibs, on = :calibration_id)
     @rtransform! $AsTable = fit_logistic(:lθ, :θ)
     transform!(:ks => ByRow(identity) => [:L, :k, :x₀, :y₀])
     @rtransform! :θs = logistic.(:lθ, :L, :k, :x₀, :y₀)
-    @transform :y2025 = Year.(:start_datetime) .== 2025
+    @rtransform! :y2025 = Year(:start_datetime) == 2025 ? "2025" : "earlier"
 end
 
 ############ plot the tyracks to check validity
@@ -106,17 +117,19 @@ GLMakie.activate!()
 
 ################################################### 10 random tracks
 
+l = 50
+n = 10
 df = @chain runs begin
-    @subset norm.(last.(:xys)) .> 50
-    @rtransform :xys = cropto(:t, :spl, :trans, 50)
+    @subset norm.(last.(:xys)) .> l
+    @rtransform :xys = cropto(:t, :spl, :trans, l)
     @rtransform :xysr = :rot.(:xys)
     @groupby :dance_induced
     @transform :n = 1:length(:dance_induced)
-    @subset :n .≤ 10
+    @subset :n .≤ n
 end
-@assert all(==(10), combine(groupby(df, :dance_induced), nrow).nrow)
+@assert all(==(n), combine(groupby(df, :dance_induced), nrow).nrow)
 
-fig = pregrouped(df.xys => first => "X (cm)", df.xys => last => "Y (cm)", col = df.dance_induced => renamer(true => "Induced", false => "Not")) * visual(Lines) |> draw(; axis = (; width = 400, height = 400))
+fig = pregrouped(df.xys => first => "X (cm)", df.xys => last => "Y (cm)", col = df.dance_induced => renamer(true => "Induced", false => "Not"), color = df.y2025) * visual(Lines) |> draw(; axis = (; width = 400, height = 400))
 for ax in fig.figure.content 
     if ax isa Axis
         for r  in (30, 50)
@@ -126,7 +139,7 @@ for ax in fig.figure.content
 end
 save(joinpath(output, "figure4.png"), fig)
 
-fig = pregrouped(df.xysr => first => "X (cm)", df.xysr => last => "Y (cm)", col = df.dance_induced => renamer(true => "Induced", false => "Not")) * visual(Lines) |> draw(; axis = (; width = 400, height = 400))
+fig = pregrouped(df.xysr => first => "X (cm)", df.xysr => last => "Y (cm)", col = df.dance_induced => renamer(true => "Induced", false => "Not"), color = df.y2025) * visual(Lines) |> draw(; axis = (; width = 400, height = 400))
 for ax in fig.figure.content 
     if ax isa Axis
         for r  in (30, 50)
@@ -196,7 +209,7 @@ m = BetaRegression.fit(BetaRegressionModel, @formula(Δθnormalized ~ dance_indu
     @rtransform! :lθshifted = :lθ .- :lpoi # .- :x₀
     @rtransform! :θnormalized = :θ .- :θ[:lpoi_index]#:k < 0 ? :θ .+ :y₀ .- π : :θ .+ :y₀
 end
-fig = pregrouped(df.lθshifted => "Distance from POI (path length cm)", df.θnormalized => rad2deg) * visual(Lines) * mapping(col = df.dance_induced => renamer(false => "Not", true => "Induced"), row = df.at_run => nonnumeric) |> draw()#; axis = (; width = 400, height = 400, ytickformat = "{:n}°", yticks = -180:90:270, limits = ((-5, 5), nothing)))
+fig = pregrouped(df.lθshifted => "Distance from POI (path length cm)", df.θnormalized => rad2deg) * visual(Lines) * mapping(col = df.dance_induced => renamer(false => "Not", true => "Induced"), row = df.at_run => nonnumeric, color = df.y2025) |> draw()#; axis = (; width = 400, height = 400, ytickformat = "{:n}°", yticks = -180:90:270, limits = ((-5, 5), nothing)))
 
 save(joinpath(output, "figure6.png"), fig)
 

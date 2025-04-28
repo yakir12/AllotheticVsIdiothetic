@@ -1,12 +1,17 @@
 using AlgebraOfGraphics, GLMakie, CairoMakie
+using GLM
+# using MultivariateStats
 
+using DataFramesMeta, Chain
 using HypothesisTests
-
+using GeometryBasics
+# using StatsBase, Graphs
 using Dates, LinearAlgebra, Statistics, Random
 using CSV, DataFrames, CameraCalibrations
 using Interpolations, StaticArrays, Dierckx, CoordinateTransformations, Rotations
 using OhMyThreads
 using LsqFit
+using Optim
 using CategoricalArrays
 using Distributions
 using IntervalSets
@@ -18,7 +23,11 @@ GLMakie.activate!()
 include("minimal_functions.jl")
 
 output = "figures"
-mkpath("figures")
+if isdir(output)
+    rm.(readdir(output; join = true))
+else
+    mkdir("figures")
+end
 
 const results_dir = "../track_calibrate/tracks and calibrations"
 
@@ -28,19 +37,66 @@ function combine_factors(light, induced, run)
     string(light, induced, run)
 end
 
-runs = CSV.read(joinpath(results_dir, "runs.csv"), DataFrame)
-transform!(runs, :spontaneous_end => ByRow(!ismissing) => :dance_spontaneous)
-transform!(runs, [:light, :dance_induced, :at_run] => ByRow(combine_factors) => :condition)
-# runs.condition .= categorical(runs.condition; levels = ["remain", "dark", "dark induced", "shift", "shift induced"], ordered = true)
+function convert_dance_by_to_binary(dance_by)
+    dance_by ∈ ("disrupt", "hold") && return true
+    dance_by == "no" && return false
+    error("third dance_by option: $dance_by")
+end
 
-calibs = CSV.read(joinpath(results_dir, "calibs.csv"), DataFrame)
-transform!(calibs, :calibration_id => ByRow(get_calibration) => :rectify)
-select!(calibs, Cols(:calibration_id, :rectify))
+runs = @chain joinpath(results_dir, "runs.csv") begin
+    CSV.read(DataFrame)
+    @subset :light .≠ "shift"
+    @transform :dance_induced = convert_dance_by_to_binary.(:dance_by)
+    @select Not(:runs_path, :start_location, :fps, :target_width, :runs_file, :window_size)
+end
+
+calibs = @chain joinpath(results_dir, "calibs.csv") begin
+    CSV.read(DataFrame)
+    @transform :rectify = get_calibration.(:calibration_id)
+    @select Cols(:calibration_id, :rectify)
+end
 leftjoin!(runs, calibs, on = :calibration_id)
-select!(runs, Not(:runs_path, :start_location, :calibration_id, :fps, :target_width, :runs_file, :window_size))
 
-rename!(runs, :poi => :intervention)
-transform!(runs, :spontaneous_end => ByRow(passmissing(tosecond)), renamecols = false)
+@chain runs begin
+    @select! Not(:calibration_id)
+    @rename! :intervention = :poi
+    @rtransform! $AsTable = get_tij(:tij_file)
+    @rtransform! $AsTable = remove_stops!(:t, :ij)
+    @transform! :xy = trectify(:rectify, :ij)
+    @aside @chain _ begin 
+        @subset(:dance_induced; view = true)
+        # @aside pregrouped(_.xy => first, _.xy => last)  * visual(Lines) * pregrouped(layout = _.run_id => nonnumeric) |> draw(figure = (;size = (1000, 1000)), axis = (;aspect = DataAspect())) |> save("before.png")
+        @rtransform! :jump = glue_intervention!(:xy, :t, :intervention)
+    end
+    @aside @chain _ begin 
+        @subset(:light .== "remain"; view = true)
+        @rtransform! :poi = impute_poi_time(:t, :xy)
+    end
+    @rtransform! :spontaneous_end = passmissing(tosecond)(:spontaneous_end)
+    # @rtransform! :poi = coalesce(:spontaneous_end, :intervention, :poi)
+    @rtransform! :poi = coalesce(:spontaneous_end, :intervention)
+    disallowmissing!(:poi)
+    @rtransform! :poi_index = something(findfirst(≥(:poi), :t), length(:t))
+    @rtransform! $AsTable = remove_loops!(:t, :xy)
+    @rtransform! $AsTable = sparseify(:t, :xy, :poi)
+    @rtransform! $AsTable = smooth(:t, :xy)
+    @rtransform! :dance_spontaneous = !ismissing(:spontaneous_end)
+    @rtransform! :condition = combine_factors(:light, :dance_induced, :at_run)
+    @rtransform! :rot = get_rotation(:xys[:poi_index])
+    @rtransform! $AsTable = get_turn_profile(:t, :spl, :poi)
+    @rtransform! $AsTable = fit_logistic(:lθ, :θ)
+    transform!(:ks => ByRow(identity) => [:L, :k, :x₀, :y₀])
+    @rtransform! :θs = logistic.(:lθ, :L, :k, :x₀, :y₀)
+    @rtransform! :y2025 = Year(:start_datetime) == 2025 ? "2025" : "earlier"
+end
+
+
+
+
+
+
+
+
 transform!(runs, [:spontaneous_end, :intervention] => ByRow(coalesce) => :poi)
 
 transform!(runs, [:tij_file, :rectify] => ByRow(get_txy) => [:t, :xy])

@@ -281,7 +281,7 @@ function get_turn_profile(t, spl, poi)
     l = get_pathlength(SV.(spl.(tl)))
     l1 = l[poi_index] - 5 # 5 cm beofe the poi
     i1 = findfirst(≥(l1), l)
-    l2 = l[poi_index] + 20 # 5 cm beofe the poi
+    l2 = l[poi_index] + 15 # 5 cm beofe the poi
     i2 = something(findfirst(≥(l2), l), n)
     θ = [atan(reverse(derivative(spl, tl[i]))...) for i in i1:i2]
     unwrap!(θ)

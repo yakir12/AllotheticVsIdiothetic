@@ -1,0 +1,1 @@
+we need to use some other time stamp for 20230112_mirror_dance10_ID30_dance01_ID31.MTS. Right now it's at timestamp 411.289. Or play with some blur etc settings... The calibration progress is at 26% now. 
