@@ -72,7 +72,6 @@ leftjoin!(runs, calibs, on = :calibration_id)
     #     @rtransform! :poi = impute_poi_time(:t, :xy)
     # end
     @rtransform! :spontaneous_end = passmissing(tosecond)(:spontaneous_end)
-    # @rtransform! :poi = coalesce(:spontaneous_end, :intervention, :poi)
     @rtransform! :poi = coalesce(:spontaneous_end, :intervention)
     disallowmissing!(:poi)
     @rtransform! :poi_index = something(findfirst(≥(:poi), :t), length(:t))

@@ -23,12 +23,12 @@ GLMakie.activate!()
 include("minimal_functions.jl")
 
 output = "figures"
-if isdir(output)
-    rm.(readdir(output; join = true))
-else
-    mkdir("figures")
-end
-
+# if isdir(output)
+#     rm.(readdir(output; join = true))
+# else
+#     mkdir("figures")
+# end
+#
 const results_dir = "../track_calibrate/tracks and calibrations"
 
 function combine_factors(light, induced, run)
@@ -56,7 +56,6 @@ calibs = @chain joinpath(results_dir, "calibs.csv") begin
     @select Cols(:calibration_id, :rectify)
 end
 leftjoin!(runs, calibs, on = :calibration_id)
-
 @chain runs begin
     @select! Not(:calibration_id)
     @rename! :intervention = :poi
@@ -73,8 +72,7 @@ leftjoin!(runs, calibs, on = :calibration_id)
         @rtransform! :poi = impute_poi_time(:t, :xy)
     end
     @rtransform! :spontaneous_end = passmissing(tosecond)(:spontaneous_end)
-    # @rtransform! :poi = coalesce(:spontaneous_end, :intervention, :poi)
-    @rtransform! :poi = coalesce(:spontaneous_end, :intervention)
+    @rtransform! :poi = coalesce(:spontaneous_end, :intervention, :poi)
     disallowmissing!(:poi)
     @rtransform! :poi_index = something(findfirst(≥(:poi), :t), length(:t))
     @rtransform! $AsTable = remove_loops!(:t, :xy)
@@ -90,53 +88,43 @@ leftjoin!(runs, calibs, on = :calibration_id)
     @rtransform! :y2025 = Year(:start_datetime) == 2025 ? "2025" : "earlier"
 end
 
-
-
-
-
-
-
-
-transform!(runs, [:spontaneous_end, :intervention] => ByRow(coalesce) => :poi)
-
-transform!(runs, [:tij_file, :rectify] => ByRow(get_txy) => [:t, :xy])
-transform!(runs, :xy => ByRow(clean_coords!) => :xy)
-transform!(runs, [:t, :xy, :poi] => ByRow(impute_poi_time) => :poi)
-disallowmissing!(runs, :poi)
-transform!(runs, [:xy, :t, :poi] => ByRow(glue_poi_index!) => [:poi_index, :dance_jump])
-transform!(runs, [:xy, :t] => ByRow(get_spline) => :spl)
-
-transform!(runs, :t => ByRow(x -> similar(x, Float64)) => :l)
+############ plot the tyracks to check validity
+CairoMakie.activate!()
+path = "tmp"
+mkpath(path)
+rm.(readdir(path, join = true))
 Threads.@threads for row in eachrow(runs)
-    row.l = get_pathlength(row.t, row.spl)
+    run_id, xy, xys, poi_index, lθ, θ, θs, lpoi, lpoi_index, dance_induced = (row.run_id, row.xy, row.xys, row.poi_index, row.lθ, row.θ, row.θs, row.lpoi, row.lpoi_index, row.dance_induced)
+    fig = Figure()
+    ax = Axis(fig[1,1], aspect = DataAspect(), title = string(dance_induced, " ", round(Int, rad2deg(row.L)), "°"))
+    lines!(ax, xy[1:poi_index], color = :black)
+    lines!(ax, xy[poi_index:end], color = :gray)
+    lines!(ax, xys[1:poi_index], color = :red)
+    lines!(ax, xys[poi_index:end], color = :orange)
+    ax = Axis(fig[1,2])
+    lines!(ax, lθ[1:lpoi_index], rad2deg.(θ[1:lpoi_index]), color = :black)
+    lines!(ax, lθ[lpoi_index:end], rad2deg.(θ[lpoi_index:end]), color = :gray)
+    lines!(ax, lθ[1:lpoi_index], rad2deg.(θs[1:lpoi_index]), color = :red)
+    lines!(ax, lθ[lpoi_index:end], rad2deg.(θs[lpoi_index:end]), color = :orange)
+    save(joinpath(path, "$(run_id).png"), fig)
 end
+GLMakie.activate!()
 
-transform!(runs, [:t, :spl] => ByRow(smooth_center) => :xyc)
-transform!(runs, [:t, :spl, :poi_index] => ByRow(get_smooth_center_poi_rotate) => :tform)
+################################################### 10 random tracks
 
-######################## Plots 
+l = 50
+n = 10
+df = @chain runs begin
+    @subset norm.(last.(:xys)) .> l
+    @rtransform :xys = cropto(:t, :spl, :trans, l)
+    @rtransform :xysr = :rot.(:xys)
+    @groupby :dance_induced
+    @transform :n = 1:length(:dance_induced)
+    @subset :n .≤ n
+end
+@assert all(==(n), combine(groupby(df, :dance_induced), nrow).nrow)
 
-df = subset(runs, :light => ByRow(≠("shift")))
-
-# my_renamer = uppercasefirst ∘ string
-my_renamer = renamer("remain" => "Remain",
-                     "dark" => "Dark",
-                     "dark 10" => "Dark 10",
-                     "dark induced" => "Dark induced")
-
-transform!(groupby(df, :condition), eachindex => :n)
-combine(groupby(df, :condition), nrow).nrow
-
-
-######################## Figure 1
-
-df1 = subset(df, :xyc => ByRow(≥(50) ∘ norm ∘ last))
-transform!(df1, :xyc => ByRow(xy -> cropto(xy, 50)) => :xyc)
-transform!(groupby(df1, :condition), eachindex => :n)
-subset!(df1, :n => ByRow(≤(10)))
-@assert all(==(10), combine(groupby(df1, :condition), nrow).nrow)
-
-fig = pregrouped(df1.xyc => first, df1.xyc => last, col = df1.condition => my_renamer) * visual(Lines) |> draw(; figure = (; size = (1200, 400)), axis=(aspect=DataAspect(), ))
+fig = pregrouped(df.xys => first => "X (cm)", df.xys => last => "Y (cm)", col = df.dance_induced => renamer(true => "Induced", false => "Not"), color = df.y2025) * visual(Lines) |> draw(; axis = (; width = 400, height = 400))
 for ax in fig.figure.content 
     if ax isa Axis
         for r  in (30, 50)
@@ -144,8 +132,20 @@ for ax in fig.figure.content
         end
     end
 end
-
 save(joinpath(output, "figure1.png"), fig)
+
+fig = pregrouped(df.xysr => first => "X (cm)", df.xysr => last => "Y (cm)", col = df.dance_induced => renamer(true => "Induced", false => "Not"), color = df.y2025) * visual(Lines) |> draw(; axis = (; width = 400, height = 400))
+for ax in fig.figure.content 
+    if ax isa Axis
+        for r  in (30, 50)
+            lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
+        end
+    end
+end
+save(joinpath(output, "figure1a.png"), fig)
+
+
+################################################### raw data for turning angles
 
 
 ######################## Figure 2
