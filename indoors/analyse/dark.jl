@@ -45,9 +45,9 @@ end
 
 runs = @chain joinpath(results_dir, "runs.csv") begin
     CSV.read(DataFrame)
+    @select Not(:runs_path, :start_location, :fps, :target_width, :runs_file, :window_size)
     @subset :light .≠ "shift"
     @transform :dance_induced = convert_dance_by_to_binary.(:dance_by)
-    @select Not(:runs_path, :start_location, :fps, :target_width, :runs_file, :window_size)
 end
 
 calibs = @chain joinpath(results_dir, "calibs.csv") begin
@@ -56,6 +56,7 @@ calibs = @chain joinpath(results_dir, "calibs.csv") begin
     @select Cols(:calibration_id, :rectify)
 end
 leftjoin!(runs, calibs, on = :calibration_id)
+
 @chain runs begin
     @select! Not(:calibration_id)
     @rename! :intervention = :poi
@@ -85,7 +86,7 @@ leftjoin!(runs, calibs, on = :calibration_id)
     @rtransform! $AsTable = fit_logistic(:lθ, :θ)
     transform!(:ks => ByRow(identity) => [:L, :k, :x₀, :y₀])
     @rtransform! :θs = logistic.(:lθ, :L, :k, :x₀, :y₀)
-    @rtransform! :y2025 = Year(:start_datetime) == 2025 ? "2025" : "earlier"
+    @rtransform! :y2025 = Year(:start_datetime) == Year(2025) ? "2025" : "earlier"
 end
 
 ############ plot the tyracks to check validity
@@ -150,19 +151,18 @@ save(joinpath(output, "figure1a.png"), fig)
 
 ######################## Figure 2
 
-df1 = transform(df, [:t, :poi_index, :tform] => ByRow((t, i, f) -> f.(t[i:end])) => :xyp)
-
-fig = pregrouped(df1.xyp => first => "X (cm)", df1.xyp => last => "Y (cm)", col = df1.condition => my_renamer) * visual(Lines) |> draw(; figure = (; size = (1200, 300)), axis=(aspect=DataAspect(), limits = (nothing, (-5, nothing))))
+fig = pregrouped(runs.xys => first => "X (cm)", runs.xys => last => "Y (cm)", col = runs.condition, color = runs.y2025) * visual(Lines) |> draw(; figure = (; size = (1200, 300)), axis=(aspect=DataAspect(), limits = (nothing, (-5, nothing))))
 
 save(joinpath(output, "figure2.png"), fig)
 
 ################################################### Figure 3
 
-df1 = transform(df, [:t, :poi_index, :tform] => ByRow((t, i, f) -> f.(t[i:end])) => :xyp)
+df1 = deepcopy(runs)
+@rtransform! df1 :xysr = :rot.(:xys)
 nr = 3
-l = floor(Int, minimum(norm ∘ last, df1.xyp))
+l = floor(Int, minimum(norm ∘ last, df1.xysr))
 r = range(1e-3, l, nr)
-transform!(df1, :xyp => ByRow(xyp -> get_exit_angle.(Ref(xyp), r)) => :θs)
+transform!(df1, :xysr => ByRow(xysr -> get_exit_angle.(Ref(xysr), r)) => :θs)
 select!(df1, Cols(:condition, :θs))
 df1.r .= Ref(r)
 
@@ -172,10 +172,10 @@ newdf = DataFrame(r = repeat(rl, outer = length(conditions)), condition = repeat
 fm = @formula(mean_resultant_vector ~ r*condition)
 function _bootstrap(df)
     n = nrow(df)
-    df1 = flatten(df[sample(1:n, n), :], [:θs, :r])
-    df2 = combine(groupby(df1, [:condition, :r]), :θs => mean_resultant_vector => :mean_resultant_vector)
+    df2 = flatten(df[sample(1:n, n), :], [:θs, :r])
+    df3 = combine(groupby(df2, [:condition, :r]), :θs => mean_resultant_vector => :mean_resultant_vector)
     try
-        m = BetaRegression.fit(BetaRegressionModel, fm, df2)
+        m = BetaRegression.fit(BetaRegressionModel, fm, df3)
         predict(m, newdf)
     catch ex
         missing
@@ -202,6 +202,6 @@ newdf.lower .= getindex.(y, 1)
 newdf.mean_resultant_vector .= getindex.(y, 2)
 newdf.upper .= getindex.(y, 3)
 
-fig = data(newdf) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, color = :condition => my_renamer => "Light") * visual(LinesFill) |> draw(; axis = (; ylabel = "Mean resultant length", xlabel = "Radius (cm)", limits = ((0, l), (0, 1))))
+fig = data(newdf) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, color = :condition => "Light") * visual(LinesFill) |> draw(; axis = (; ylabel = "Mean resultant length", xlabel = "Radius (cm)", limits = ((0, l), (0, 1))))
 
 save(joinpath(output, "figure3.png"), fig)

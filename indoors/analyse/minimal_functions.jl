@@ -270,7 +270,7 @@ function get_exit_angle(xyp, r)
 end
 
 function mean_resultant_vector(θ)
-    norm(mean(SV ∘ reverse ∘ sincos, θ))
+    norm(mean(SV ∘ sincos, θ))
 end
 
 
