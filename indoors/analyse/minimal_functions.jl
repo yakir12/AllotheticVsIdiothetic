@@ -269,6 +269,16 @@ function get_exit_angle(xyp, r)
     atan(y, x)
 end
 
+# function get_exit_angle(xyp, l)
+#     ls = get_pathlength(xyp)
+#     i = findfirst(≥(l), ls)
+#     if isnothing(i)
+#         return missing
+#     end
+#     x, y = xyp[i]
+#     atan(y, x)
+# end
+
 function mean_resultant_vector(θ)
     norm(mean(SV ∘ sincos, θ))
 end
