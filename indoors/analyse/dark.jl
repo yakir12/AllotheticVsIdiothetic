@@ -234,43 +234,31 @@ function bootstrap(df)
     return rows, stack(ys)
 end
 pc, c = bootstrap(df)
+select!(pc, Not(Symbol("(Precision)")))
 
 y = quantile.(skipmissing.(eachrow(c)), Ref([0.025, 0.5, 0.975]))
 newdf.lower .= getindex.(y, 1)
 newdf.mean_resultant_vector .= getindex.(y, 2)
 newdf.upper .= getindex.(y, 3)
-
 function stats(x)
     q1, med, q2 = quantile(x, [0.025, 0.5, 0.975])
     mod = mode(x)
     μ = mean(x)
     [q1, med, q2, mod, μ]
 end
-
-pvalues = combine(pc, All() .=> stats)
+pvalues = combine(pc, All() .=> stats, renamecols = false)
 pvalues.what = ["q1", "median", "q2", "mode", "mean"]
+df2 = stack(pvalues, variable_name = :source)
+pvalues = combine(groupby(df2, :source), [:what, :value] => ((what, value) -> (; Pair.(Symbol.(what), value)...)) => ["q1", "median", "q2", "mode", "mean"])
 
-p = quantile.(skipmissing.(eachrow(pc)), Ref([0.025, 0.5, 0.975]))
-lower_p = getindex.(p, 1)
-mean_p = getindex.(p, 2)
-upper_p = getindex.(p, 3)
+critical R values!!!!
 
-for row in eachrow(pc)
-    i = findfirst(>(0.05), sort(row))
-    p = if isnothing(i)
-        0.0
-    else
-        1 - i/length(p1)
-    end
-    @show p
-end
-
-n = nrow(df)
-df2 = flatten(df, [:θs, :r])
-df3 = combine(groupby(df2, [:condition, :r]), :θs => mean_resultant_vector => :mean_resultant_vector)
-df3.condition = categorical(df3.condition)
-levels!(df3.condition, ["remain", "no", "hold", "disrupt"])
-m = BetaRegression.fit(BetaRegressionModel, fm, df3)
+# n = nrow(df)
+# df2 = flatten(df, [:θs, :r])
+# df3 = combine(groupby(df2, [:condition, :r]), :θs => mean_resultant_vector => :mean_resultant_vector)
+# df3.condition = categorical(df3.condition)
+# levels!(df3.condition, ["remain", "no", "hold", "disrupt"])
+# m = BetaRegression.fit(BetaRegressionModel, fm, df3)
 
 
 
@@ -279,3 +267,4 @@ fig = data(newdf) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = 
 save(joinpath(output, "figure3.png"), fig)
 
 
+CSV.write("$nr.csv", pvalues)
