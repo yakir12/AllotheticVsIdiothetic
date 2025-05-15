@@ -159,52 +159,71 @@ fig = pregrouped(runs.xysr => first => "X (cm)", runs.xysr => last => "Y (cm)", 
 
 save(joinpath(output, "figure2.png"), fig)
 
-fig = pregrouped(runs.xysrc => first => "X (cm)", runs.xysrc => last => "Y (cm)", col = runs.light => sorter(["remain", "dark"]), row = runs.dance_by => sorter(["no", "hold", "disrupt"]),  color = runs.y2025 => "Recorded at", linestyle = runs.at_run => nonnumeric => "At run") * visual(Lines) |> draw(; figure = (; size = (1200, 1000)), axis=(aspect=DataAspect(), limits = (nothing, (-5, nothing))));
-save(joinpath(output, "figure2a.png"), fig)
-
 ################################################### Figure 3
 
 
 df = @subset runs :at_run .== 1
-@rtransform! df :condition = :light == "remain" ? "remain" : :dance_by
+# @rtransform! df :condition = :light == "remain" ? "remain" : :dance_by
 nr = 3
 l = floor(Int, minimum(norm ∘ last, df.xysrc))
 rl = range(1e-3, l, nr)
 transform!(df, :xysrc => ByRow(xysrc -> get_exit_angle.(Ref(xysrc), rl)) => :θs)
 
-select!(df, Cols(:condition, :θs))
+R = 60
+fig = pregrouped(df.xysrc => first => "X (cm)", df.xysrc => last => "Y (cm)", col = df.light => renamer("remain" => "Lights on", "dark" => "Lights off"), row = df.dance_by => renamer("no" => "Nothing", "hold" => "Holding ball", "disrupt" => "Removing from ball")) * visual(Lines) |> draw(; figure = (; size = (1200, 1000)), axis=(width = 300, height = 300, limits = ((-R, R), (-R, R))))
+
+save(joinpath(output, "figure2a.png"), fig)
+
+select!(df, Cols(:light, :dance_by, :θs))
+# select!(df, Cols(:condition, :θs))
 df.r .= Ref(rl)
 
-df.condition = categorical(df.condition)
-levels!(df.condition, ["remain", "no", "hold", "disrupt"])
+df.light = categorical(df.light)
+levels!(df.light, ["remain", "dark"])
+df.dance_by = categorical(df.dance_by)
+levels!(df.dance_by, ["no", "hold", "disrupt"])
 
 
-fig = Figure()
-for (i, (k, g)) in enumerate(pairs(groupby(df, :condition)))
-    ax = PolarAxis(fig[i,1])
-    # _df = flatten(g, [:θs, :r])
-    # scatter!(ax, _df.θs, _df.r)
-    for row in eachrow(g)
-        scatter!(ax, row.θs, row.r)
-    end
-end
 
 
-# df2 = flatten(df, [:θs, :r])
-# data(df2) * mapping(:r, :θs, row = :condition => renamer("remain" => "Light on", "no" => "No disruption", "hold" => "Hold", "disrupt" => "Taken off ball")) * visual(Violin) |> draw()
 
-conditions = levels(df.condition)
+# df.condition = categorical(df.condition)
+# levels!(df.condition, ["remain", "no", "hold", "disrupt"])
+
+
+# fig = Figure()
+# for (i, (k, g)) in enumerate(pairs(groupby(df, :condition)))
+#     ax = PolarAxis(fig[i,1])
+#     # _df = flatten(g, [:θs, :r])
+#     # scatter!(ax, _df.θs, _df.r)
+#     for row in eachrow(g)
+#         scatter!(ax, row.θs, row.r)
+#     end
+# end
+
+newdf = combine(groupby(df, [:light, :dance_by]), :r => first ∘ first => :r)
 nr2 = 100
 rl2 = range(extrema(rl)..., nr2)
-newdf = DataFrame(r = repeat(rl2, outer = length(conditions)), condition = repeat(conditions, inner = nr2), mean_resultant_vector = zeros(nr2*length(conditions)))
-fm = @formula(mean_resultant_vector ~ r*condition)
+newdf.r .= Ref(rl2)
+newdf = flatten(newdf, :r)
+newdf.mean_resultant_vector .= 0.0
+
+fm = @formula(mean_resultant_vector ~ light + r + dance_by)
+
+# conditions = levels(df.condition)
+# nr2 = 100
+# rl2 = range(extrema(rl)..., nr2)
+# newdf = DataFrame(r = repeat(rl2, outer = length(conditions)), condition = repeat(conditions, inner = nr2), mean_resultant_vector = zeros(nr2*length(conditions)))
+# fm = @formula(mean_resultant_vector ~ r*condition)
 
 function _bootstrap(df)
     n = nrow(df)
     df2 = flatten(df[sample(1:n, n), :], [:θs, :r])
-    df3 = combine(groupby(df2, [:condition, :r]), :θs => mean_resultant_vector => :mean_resultant_vector)
-    df3.condition = categorical(df3.condition)
-    levels!(df3.condition, ["remain", "no", "hold", "disrupt"])
+    df3 = combine(groupby(df2, [:light, :dance_by, :r]), :θs => mean_resultant_vector => :mean_resultant_vector)
+    df3.light = categorical(df3.light)
+    levels!(df3.light, ["remain", "dark"])
+    df3.dance_by = categorical(df3.dance_by)
+    levels!(df3.dance_by, ["no", "hold", "disrupt"])
     try
         m = BetaRegression.fit(BetaRegressionModel, fm, df3)
         tbl = coeftable(m)
@@ -215,11 +234,29 @@ function _bootstrap(df)
         missing
     end
 end
+
+# function _bootstrap(df)
+#     n = nrow(df)
+#     df2 = flatten(df[sample(1:n, n), :], [:θs, :r])
+#     df3 = combine(groupby(df2, [:condition, :r]), :θs => mean_resultant_vector => :mean_resultant_vector)
+#     df3.condition = categorical(df3.condition)
+#     levels!(df3.condition, ["remain", "no", "hold", "disrupt"])
+#     try
+#         m = BetaRegression.fit(BetaRegressionModel, fm, df3)
+#         tbl = coeftable(m)
+#         row = (; Pair.(Symbol.(tbl.rownms), tbl.cols[tbl.pvalcol])...)
+#         # row = tbl.cols[tbl.pvalcol]
+#         (row,  predict(m, newdf))
+#     catch ex
+#         missing
+#     end
+# end
 function bootstrap(df)
     n = 10_000
-    ys = Vector{Vector{Float64}}(undef, n)
+    row, y = _bootstrap(df)
+    rows = DataFrame(Dict(pairs(row)))
+    empty!(rows)
     ys = Matrix{Float64}(undef, nrow(newdf), n)
-    rows = DataFrame(var"(Intercept)" = Float64[], r = Float64[], var"condition: hold" = Float64[], var"condition: disrupt" = Float64[], var"condition: no" = Float64[], var"r & condition: hold" = Float64[], var"r & condition: disrupt" = Float64[], var"r & condition: no" = Float64[], var"(Precision)" = Float64[])
     i = 0
     while i < n
         rowy = _bootstrap(df)
@@ -241,17 +278,22 @@ newdf.lower .= getindex.(y, 1)
 newdf.mean_resultant_vector .= getindex.(y, 2)
 newdf.upper .= getindex.(y, 3)
 function stats(x)
+    p = something(findfirst(>(0.05), sort!(x)), length(x))/length(x)
     q1, med, q2 = quantile(x, [0.025, 0.5, 0.975])
     mod = mode(x)
     μ = mean(x)
-    [q1, med, q2, mod, μ]
+    [p, q1, med, q2, mod, μ]
 end
 pvalues = combine(pc, All() .=> stats, renamecols = false)
-pvalues.what = ["q1", "median", "q2", "mode", "mean"]
+pvalues.what = ["proportion", "q1", "median", "q2", "mode", "mean"]
 df2 = stack(pvalues, variable_name = :source)
-pvalues = combine(groupby(df2, :source), [:what, :value] => ((what, value) -> (; Pair.(Symbol.(what), value)...)) => ["q1", "median", "q2", "mode", "mean"])
+pvalues = combine(groupby(df2, :source), [:what, :value] => ((what, value) -> (; Pair.(Symbol.(what), value)...)) => ["proportion", "q1", "median", "q2", "mode", "mean"])
 
-critical R values!!!!
+critical_r(n, p = 0.05) = sqrt(-4n * log(p) + 4n - log(p)^2 + 1)/(2n)
+
+df2 = combine(groupby(df, [:light, :dance_by]), nrow)
+@transform! df2 :r̄ = critical_r.(:nrow)
+
 
 # n = nrow(df)
 # df2 = flatten(df, [:θs, :r])
@@ -260,9 +302,12 @@ critical R values!!!!
 # levels!(df3.condition, ["remain", "no", "hold", "disrupt"])
 # m = BetaRegression.fit(BetaRegressionModel, fm, df3)
 
+# + data(df2) * mapping(:r̄, col = :light, color = :dance_by => renamer("no" => "No disruption", "hold" => "Hold", "disrupt" => "Taken off ball") => "Light") * visual(HLines) 
+#, yticks = ([0; sort(df2.r̄); 0.5; 1], ["0", "", "", "", "", "0.5", "1"]
+
+fig = data(newdf) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, group = [:light, :dance_by], col = :light => renamer("remain" => "Lights on", "dark" => "Lights off"), color = :dance_by => renamer("no" => "Nothing", "hold" => "Holding ball", "disrupt" => "Removing from ball") => "Dance induced by") * visual(LinesFill) |> draw(; axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = ((0, l), (0, 1))))
 
 
-fig = data(newdf) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, color = :condition => renamer("remain" => "Light on", "no" => "No disruption", "hold" => "Hold", "disrupt" => "Taken off ball") => "Light") * visual(LinesFill) |> draw(; axis = (; ylabel = "Mean resultant length", xlabel = "Radius (cm)", limits = ((0, l), (0, 1))));
 
 save(joinpath(output, "figure3.png"), fig)
 
