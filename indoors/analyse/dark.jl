@@ -168,20 +168,46 @@ nr = 3
 l = floor(Int, minimum(norm ∘ last, df.xysrc))
 rl = range(1e-3, l, nr)
 transform!(df, :xysrc => ByRow(xysrc -> get_exit_angle.(Ref(xysrc), rl)) => :θs)
-
-R = 60
-fig = pregrouped(df.xysrc => first => "X (cm)", df.xysrc => last => "Y (cm)", col = df.light => renamer("remain" => "Lights on", "dark" => "Lights off"), row = df.dance_by => renamer("no" => "Nothing", "hold" => "Holding ball", "disrupt" => "Removing from ball")) * visual(Lines) |> draw(; figure = (; size = (1200, 1000)), axis=(width = 300, height = 300, limits = ((-R, R), (-R, R))))
-
-save(joinpath(output, "figure2a.png"), fig)
-
-select!(df, Cols(:light, :dance_by, :θs))
-# select!(df, Cols(:condition, :θs))
-df.r .= Ref(rl)
-
+select!(df, Cols(:light, :dance_by, :θs, :xysrc))
 df.light = categorical(df.light)
 levels!(df.light, ["remain", "dark"])
 df.dance_by = categorical(df.dance_by)
 levels!(df.dance_by, ["no", "hold", "disrupt"])
+
+R = 60
+fig = pregrouped(df.xysrc => first => "X (cm)", df.xysrc => last => "Y (cm)", col = df.light => renamer("remain" => "Lights on", "dark" => "Lights off"), row = df.dance_by => renamer("no" => "Nothing", "hold" => "Holding ball", "disrupt" => "Removing from ball")) * visual(Lines) |> draw(; axis=(width = 300, height = 300, limits = ((-R, R), (-R, R))))
+# , width = 300, height = 300
+
+save(joinpath(output, "figure2a.png"), fig)
+
+light_rename = Dict("remain" => "Lights on", "dark" => "Lights off")
+dance_by_rename = Dict("no" => "Nothing", "hold" => "Holding ball", "disrupt" => "Removing from ball")
+fig = Figure()
+for ((light, dance_by), g) in pairs(groupby(df, [:light, :dance_by]))
+    i = findfirst(==(dance_by), levels(df.dance_by))
+    j = findfirst(==(light), levels(df.light))
+    ax = PolarAxis(fig[i, j], rlimits = (0, 44), width = 300, height = 300)
+    for xy in g.xysrc
+        θ = splat(atan).(xy) .+ π/2
+        r = norm.(xy)
+        lines!(ax, θ, r, color = :black)
+    end
+    if i == 1
+        Label(fig[0,j], light_rename[string(light)], font = :bold)
+    end
+    if j == 2
+        Label(fig[i,3], dance_by_rename[string(dance_by)], rotation = -π/2, font = :bold)
+    end
+end
+resize_to_layout!(fig)
+
+save(joinpath(output, "figure2b.png"), fig)
+
+
+select!(df, Not(:xysrc))
+# select!(df, Cols(:condition, :θs))
+df.r .= Ref(rl)
+
 
 
 
