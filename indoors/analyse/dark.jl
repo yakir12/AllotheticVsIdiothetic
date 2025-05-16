@@ -22,33 +22,23 @@ GLMakie.activate!()
 
 include("minimal_functions.jl")
 
-output = "figures"
-# if isdir(output)
-#     rm.(readdir(output; join = true))
-# else
-#     mkdir("figures")
-# end
-#
+output = "dark"
+if isdir(output)
+    rm.(readdir(output; join = true))
+else
+    mkdir(output)
+end
+
 const results_dir = "../track_calibrate/tracks and calibrations"
 
 function combine_factors(light, dance_by, run)
     "$light $dance_by $run"
-    # dance_by = dance_by == " no" ? "" : dance_by
-    # run = run > 1 ? " $run" : ""
-    # string(light, dance_by, run)
 end
-
-# function convert_dance_by_to_binary(dance_by)
-#     dance_by ∈ ("disrupt", "hold") && return true
-#     dance_by == "no" && return false
-#     error("third dance_by option: $dance_by")
-# end
 
 runs = @chain joinpath(results_dir, "runs.csv") begin
     CSV.read(DataFrame)
     @select Not(:runs_path, :start_location, :fps, :target_width, :runs_file, :window_size)
     @subset :light .≠ "shift"
-    # @transform :dance_induced = convert_dance_by_to_binary.(:dance_by)
 end
 
 calibs = @chain joinpath(results_dir, "calibs.csv") begin
@@ -242,60 +232,6 @@ fm = @formula(mean_resultant_vector ~ light + r + dance_by)
 # newdf = DataFrame(r = repeat(rl2, outer = length(conditions)), condition = repeat(conditions, inner = nr2), mean_resultant_vector = zeros(nr2*length(conditions)))
 # fm = @formula(mean_resultant_vector ~ r*condition)
 
-function _bootstrap(df)
-    n = nrow(df)
-    df2 = flatten(df[sample(1:n, n), :], [:θs, :r])
-    df3 = combine(groupby(df2, [:light, :dance_by, :r]), :θs => mean_resultant_vector => :mean_resultant_vector)
-    df3.light = categorical(df3.light)
-    levels!(df3.light, ["remain", "dark"])
-    df3.dance_by = categorical(df3.dance_by)
-    levels!(df3.dance_by, ["no", "hold", "disrupt"])
-    try
-        m = BetaRegression.fit(BetaRegressionModel, fm, df3)
-        tbl = coeftable(m)
-        row = (; Pair.(Symbol.(tbl.rownms), tbl.cols[tbl.pvalcol])...)
-        # row = tbl.cols[tbl.pvalcol]
-        (row,  predict(m, newdf))
-    catch ex
-        missing
-    end
-end
-
-# function _bootstrap(df)
-#     n = nrow(df)
-#     df2 = flatten(df[sample(1:n, n), :], [:θs, :r])
-#     df3 = combine(groupby(df2, [:condition, :r]), :θs => mean_resultant_vector => :mean_resultant_vector)
-#     df3.condition = categorical(df3.condition)
-#     levels!(df3.condition, ["remain", "no", "hold", "disrupt"])
-#     try
-#         m = BetaRegression.fit(BetaRegressionModel, fm, df3)
-#         tbl = coeftable(m)
-#         row = (; Pair.(Symbol.(tbl.rownms), tbl.cols[tbl.pvalcol])...)
-#         # row = tbl.cols[tbl.pvalcol]
-#         (row,  predict(m, newdf))
-#     catch ex
-#         missing
-#     end
-# end
-function bootstrap(df)
-    n = 10_000
-    row, y = _bootstrap(df)
-    rows = DataFrame(Dict(pairs(row)))
-    empty!(rows)
-    ys = Matrix{Float64}(undef, nrow(newdf), n)
-    i = 0
-    while i < n
-        rowy = _bootstrap(df)
-        if ismissing(rowy)
-            continue
-        else
-            i += 1
-            row, ys[:, i] = rowy
-            push!(rows, row)
-        end
-    end
-    return rows, stack(ys)
-end
 pc, c = bootstrap(df)
 select!(pc, Not(Symbol("(Precision)")))
 
@@ -303,19 +239,11 @@ y = quantile.(skipmissing.(eachrow(c)), Ref([0.025, 0.5, 0.975]))
 newdf.lower .= getindex.(y, 1)
 newdf.mean_resultant_vector .= getindex.(y, 2)
 newdf.upper .= getindex.(y, 3)
-function stats(x)
-    p = something(findfirst(>(0.05), sort!(x)), length(x))/length(x)
-    q1, med, q2 = quantile(x, [0.025, 0.5, 0.975])
-    mod = mode(x)
-    μ = mean(x)
-    [p, q1, med, q2, mod, μ]
-end
 pvalues = combine(pc, All() .=> stats, renamecols = false)
-pvalues.what = ["proportion", "q1", "median", "q2", "mode", "mean"]
-df2 = stack(pvalues, variable_name = :source)
-pvalues = combine(groupby(df2, :source), [:what, :value] => ((what, value) -> (; Pair.(Symbol.(what), value)...)) => ["proportion", "q1", "median", "q2", "mode", "mean"])
+pvalues.what = ["proportion", "Q2.5", "median", "Q97.5", "mode", "mean"]
+df2 = stack(pvalues, Not(:what), variable_name = :source)
+pvalues = combine(groupby(df2, :source), [:what, :value] => ((what, value) -> (; Pair.(Symbol.(what), value)...)) => ["proportion", "Q2.5", "median", "Q97.5", "mode", "mean"])
 
-critical_r(n, p = 0.05) = sqrt(-4n * log(p) + 4n - log(p)^2 + 1)/(2n)
 
 df2 = combine(groupby(df, [:light, :dance_by]), nrow)
 @transform! df2 :r̄ = critical_r.(:nrow)
@@ -337,5 +265,5 @@ fig = data(newdf) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = 
 
 save(joinpath(output, "figure3.png"), fig)
 
+show(pvalues, show_row_number=false, eltypes=false)
 
-CSV.write("$nr.csv", pvalues)
