@@ -17,6 +17,7 @@ using Distributions
 using IntervalSets
 using QuadGK
 using BetaRegression
+using DimensionalData
 
 GLMakie.activate!()
 
@@ -31,16 +32,11 @@ end
 
 const results_dir = "../track_calibrate/tracks and calibrations"
 
-function combine_factors(light, dance_by, run)
-    "$light $dance_by $run"
-end
-
 runs = @chain joinpath(results_dir, "runs.csv") begin
     CSV.read(DataFrame)
     @select Not(:runs_path, :start_location, :fps, :target_width, :runs_file, :window_size)
     @subset :light .≠ "shift"
 end
-
 calibs = @chain joinpath(results_dir, "calibs.csv") begin
     CSV.read(DataFrame)
     @transform :rectify = get_calibration.(:calibration_id)
@@ -51,14 +47,14 @@ leftjoin!(runs, calibs, on = :calibration_id)
 @chain runs begin
     @select! Not(:calibration_id)
     @rename! :intervention = :poi
-    @rtransform! $AsTable = get_tij(:tij_file)
-    @rtransform! $AsTable = remove_stops!(:t, :ij)
-    @transform! :xy = trectify(:rectify, :ij)
+    @rtransform! :pixels = get_tij(:tij_file)
+    @rtransform! :pixels = remove_stops(:pixels)
+    @transform! :xy = trectify(:rectify, :pixels)
+end
+
     @transform! :_distrupt = :dance_by .≠ "no"
     @aside @chain _ begin 
         @subset(:_distrupt; view = true)
-        # @subset(:dance_by => x -> x .≠ "no"; view = true)
-        # @aside pregrouped(_.xy => first, _.xy => last)  * visual(Lines) * pregrouped(layout = _.run_id => nonnumeric) |> draw(figure = (;size = (1000, 1000)), axis = (;aspect = DataAspect())) |> save("before.png")
         @rtransform! :jump = glue_intervention!(:xy, :t, :intervention)
     end
     @aside @chain _ begin 
@@ -73,15 +69,16 @@ leftjoin!(runs, calibs, on = :calibration_id)
     @rtransform! $AsTable = sparseify(:t, :xy, :poi)
     @rtransform! $AsTable = smooth(:t, :xy)
     @rtransform! :dance_spontaneous = !ismissing(:spontaneous_end)
-    @rtransform! :condition = combine_factors(:light, :dance_by, :at_run)
+    @transform! :condition = string.(:light, " ", :dance_by, " ", :at_run)
     @rtransform! :rot = get_rotation(:xys[:poi_index])
     @rtransform! :xysr = :rot.(:xys)
     @rtransform! :xysrc = :xysr[:poi_index:end] .- Ref(:xysr[:poi_index])
-    @rtransform! $AsTable = get_turn_profile(:t, :spl, :poi)
-    @rtransform! $AsTable = fit_logistic(:lθ, :θ)
-    transform!(:ks => ByRow(identity) => [:L, :k, :x₀, :y₀])
-    @rtransform! :θs = logistic.(:lθ, :L, :k, :x₀, :y₀)
+    # @rtransform! $AsTable = get_turn_profile(:t, :spl, :poi)
+    # @rtransform! $AsTable = fit_logistic(:lθ, :θ)
+    # transform!(:ks => ByRow(identity) => [:L, :k, :x₀, :y₀])
+    # @rtransform! :θs = logistic.(:lθ, :L, :k, :x₀, :y₀)
     @rtransform! :y2025 = Year(:start_datetime) == Year(2025) ? "2025" : "earlier"
+    @aside pregrouped(_.xys => first, _.xys => last)  * visual(Lines) * pregrouped(layout = _.run_id => nonnumeric) |> draw(figure = (;size = (1000, 1000)), axis = (;aspect = DataAspect())) |> save("summary.png")
 end
 
 ############ plot the tyracks to check validity
@@ -90,18 +87,19 @@ path = "tmp"
 mkpath(path)
 rm.(readdir(path, join = true))
 Threads.@threads for row in eachrow(runs)
-    run_id, xy, xys, poi_index, lθ, θ, θs, lpoi, lpoi_index, dance_by = (row.run_id, row.xy, row.xys, row.poi_index, row.lθ, row.θ, row.θs, row.lpoi, row.lpoi_index, row.dance_by)
+    run_id, xy, xys, poi_index, dance_by = (row.run_id, row.xy, row.xys, row.poi_index, row.dance_by)
+    # run_id, xy, xys, poi_index, lθ, θ, θs, lpoi, lpoi_index, dance_by = (row.run_id, row.xy, row.xys, row.poi_index, row.lθ, row.θ, row.θs, row.lpoi, row.lpoi_index, row.dance_by)
     fig = Figure()
-    ax = Axis(fig[1,1], aspect = DataAspect(), title = string(dance_by, " ", round(Int, rad2deg(row.L)), "°"))
+    ax = Axis(fig[1,1], aspect = DataAspect(), title = dance_by)
     lines!(ax, xy[1:poi_index], color = :black)
     lines!(ax, xy[poi_index:end], color = :gray)
     lines!(ax, xys[1:poi_index], color = :red)
     lines!(ax, xys[poi_index:end], color = :orange)
-    ax = Axis(fig[1,2])
-    lines!(ax, lθ[1:lpoi_index], rad2deg.(θ[1:lpoi_index]), color = :black)
-    lines!(ax, lθ[lpoi_index:end], rad2deg.(θ[lpoi_index:end]), color = :gray)
-    lines!(ax, lθ[1:lpoi_index], rad2deg.(θs[1:lpoi_index]), color = :red)
-    lines!(ax, lθ[lpoi_index:end], rad2deg.(θs[lpoi_index:end]), color = :orange)
+    # ax = Axis(fig[1,2])
+    # lines!(ax, lθ[1:lpoi_index], rad2deg.(θ[1:lpoi_index]), color = :black)
+    # lines!(ax, lθ[lpoi_index:end], rad2deg.(θ[lpoi_index:end]), color = :gray)
+    # lines!(ax, lθ[1:lpoi_index], rad2deg.(θs[1:lpoi_index]), color = :red)
+    # lines!(ax, lθ[lpoi_index:end], rad2deg.(θs[lpoi_index:end]), color = :orange)
     save(joinpath(path, "$(run_id).png"), fig)
 end
 GLMakie.activate!()
@@ -113,6 +111,7 @@ n = 10
 df = @chain runs begin
     @subset norm.(last.(:xys)) .> l
     @rtransform :xys = cropto(:t, :spl, :trans, l)
+    @rtransform :xysr = :rot.(:xys)
     @groupby :dance_by
     @transform :n = 1:length(:dance_by)
     @subset :n .≤ n
@@ -146,6 +145,13 @@ save(joinpath(output, "figure1a.png"), fig)
 ######################## Figure 2
 
 fig = pregrouped(runs.xysr => first => "X (cm)", runs.xysr => last => "Y (cm)", col = runs.condition, color = runs.y2025) * visual(Lines) |> draw(; figure = (; size = (1200, 300)), axis=(aspect=DataAspect(), limits = (nothing, (-5, nothing))))
+for ax in fig.figure.content 
+    if ax isa Axis
+        for r  in (30, 50)
+            lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
+        end
+    end
+end
 
 save(joinpath(output, "figure2.png"), fig)
 

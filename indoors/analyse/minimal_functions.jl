@@ -1,5 +1,7 @@
 const SV = SVector{2, Float64}
 
+
+
 critical_r(n, p = 0.05) = sqrt(-4n * log(p) + 4n - log(p)^2 + 1)/(2n)
 
 function _bootstrap(df)
@@ -74,9 +76,10 @@ function stats(x)
     μ = mean(x)
     [string(round(Int, 100p), "%"), formatp(q1), formatp(med), formatp(q2), formatp(mod), formatp(μ)]
 end
+
 function trectify(fs, xs)
     n = length(xs)
-    ys = Vector{Vector{SVector{2, Float64}}}.(undef, n)
+    ys = Vector{DimVector{SV}}.(undef, n)
     Threads.@threads for i in 1:n
         y = fs[i].(xs[i])
         y .-= Ref(y[1])
@@ -106,18 +109,20 @@ tosecond(sec::Real) = sec
 #     (; t, xy)
 # end
 
+function remove_stops(ij)
+    keep = [1]
+    for i in 2:length(ij)
+        if ij[i] ≠ ij[i - 1]
+            push!(keep, i)
+        end
+    end
+    ij[keep]
+end
+
 function get_tij(file)
     tij = CSV.File(joinpath(results_dir, file))
     t = range(tij.t[1], tij.t[end], length = length(tij))
-    (; t = collect(t), ij = tuple.(tij.i, tij.j))
-end
-
-function remove_stops!(t, ij)
-    tokill = map(==, ij[1:end - 1], ij[2:end])
-    pushfirst!(tokill, false)
-    deleteat!(t, tokill)
-    deleteat!(ij, tokill)
-    return (; t, ij)
+    pixels = DimVector(CameraCalibrations.RowCol.(tij.i, tij.j), (; t))
 end
 
 # function remove_stops!(t, xy)
@@ -415,7 +420,7 @@ function cropto(t, spl, trans, l)
     fun(t) = abs2(norm(trans(SV(spl(t)))) - l)
     res = optimize(fun, t1, t2)
     tend = Optim.minimizer(res)
-    tl = range(t[1], tend, 100)
+    tl = range(t[1], tend, i)
     trans.(SV.(spl.(tl)))
 end
 
