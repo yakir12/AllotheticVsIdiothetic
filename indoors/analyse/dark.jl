@@ -1,7 +1,6 @@
 using AlgebraOfGraphics, GLMakie, CairoMakie
 using GLM
 # using MultivariateStats
-
 using DataFramesMeta, Chain
 using HypothesisTests
 using GeometryBasics
@@ -49,7 +48,12 @@ leftjoin!(runs, calibs, on = :calibration_id)
     @rename! :intervention = :poi
     @rtransform! :pixels = get_tij(:tij_file)
     @rtransform! :pixels = remove_stops(:pixels)
+    @aside @assert !any(has_stops, _.pixels) "some stops remain?!"
     @transform! :xy = trectify(:rectify, :pixels)
+    @aside @chain _ begin 
+        @subset(:dance_by .≠ "no"; view = true)
+        @rtransform! :jump = glue_intervention!(:xy, :intervention)
+    end
 end
 
     @transform! :_distrupt = :dance_by .≠ "no"

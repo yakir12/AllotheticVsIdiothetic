@@ -109,6 +109,15 @@ tosecond(sec::Real) = sec
 #     (; t, xy)
 # end
 
+function has_stops(ij)
+    for i in 2:length(ij)
+        if ij[i] == ij[i - 1]
+            return true
+        end
+    end
+    return false
+end
+
 function remove_stops(ij)
     keep = [1]
     for i in 2:length(ij)
@@ -291,7 +300,8 @@ function impute_poi_time(t, xy)
     t[poi_index]
 end
 
-function glue_intervention!(xy, t, intervention)
+function glue_intervention(xy, intervention)
+    t = val(DimensionalData.dims(xy, :t))
     inter_i = something(findfirst(≥(intervention), t), length(t))
     h = 2
     diffs = diff(xy[1:inter_i + h + 1])
@@ -300,7 +310,8 @@ function glue_intervention!(xy, t, intervention)
     σ = std(Δs[1:inter_i - h], mean = μ)
     for i in inter_i - h:inter_i + h
         if Δs[i] > μ + 1.5σ
-            xy[i + 1:end] .-= Ref(diffs[i] - μ*normalize(diffs[i]))
+            Δxy = diffs[i] - μ*normalize(diffs[i])
+            xy[i + 1:end] .-= Ref(Δxy)
             return Δs[i]
         end
     end
