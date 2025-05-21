@@ -42,39 +42,35 @@ calibs = @chain joinpath(results_dir, "calibs.csv") begin
     @select Cols(:calibration_id, :rectify)
 end
 leftjoin!(runs, calibs, on = :calibration_id)
-
 @chain runs begin
     @select! Not(:calibration_id)
     @rename! :intervention = :poi
     @rtransform! :pixels = get_tij(:tij_file)
     @rtransform! :pixels = remove_stops(:pixels)
-    @aside @assert !any(has_stops, _.pixels) "some stops remain?!"
+    # @aside @assert !any(has_stops, _.pixels) "some stops remain?!" # convert to a test
     @transform! :xy = trectify(:rectify, :pixels)
     @aside @chain _ begin 
         @subset(:dance_by .≠ "no"; view = true)
         @rtransform! :jump = glue_intervention!(:xy, :intervention)
     end
-end
-
-    @transform! :_distrupt = :dance_by .≠ "no"
-    @aside @chain _ begin 
-        @subset(:_distrupt; view = true)
-        @rtransform! :jump = glue_intervention!(:xy, :t, :intervention)
-    end
     @aside @chain _ begin 
         @subset(:light .== "remain"; view = true)
-        @rtransform! :poi = impute_poi_time(:t, :xy)
+        @rtransform! :intervention = impute_poi_time(:xy)
     end
     @rtransform! :spontaneous_end = passmissing(tosecond)(:spontaneous_end)
-    @rtransform! :poi = coalesce(:spontaneous_end, :intervention, :poi)
+    @rtransform! :poi = coalesce(:spontaneous_end, :intervention)
     disallowmissing!(:poi)
-    @rtransform! :poi_index = something(findfirst(≥(:poi), :t), length(:t))
-    @rtransform! $AsTable = remove_loops!(:t, :xy)
-    @rtransform! $AsTable = sparseify(:t, :xy, :poi)
-    @rtransform! $AsTable = smooth(:t, :xy)
-    @rtransform! :dance_spontaneous = !ismissing(:spontaneous_end)
+    @select! Not(:intervention)
+    @transform! :xy = remove_loops.(:xy)
+    @transform! :xy = sparseify.(:xy)
+    @rtransform! :spl = ParametricSpline(lookup(:xy, Ti), stack(:xy), k = 3, s = 25)
+    @rtransform! :center2start = Translation(-SV(:spl(first(lookup(:xy, Ti)))))
+    @transform! :rotate2poi = get_rotation.(:xy, :poi, :center2start)
+    @transform! :dance_spontaneous = .!ismissing.(:spontaneous_end)
     @transform! :condition = string.(:light, " ", :dance_by, " ", :at_run)
-    @rtransform! :rot = get_rotation(:xys[:poi_index])
+end
+
+    # @rtransform! :poi_index = something(findfirst(≥(:poi), :t), length(:t))
     @rtransform! :xysr = :rot.(:xys)
     @rtransform! :xysrc = :xysr[:poi_index:end] .- Ref(:xysr[:poi_index])
     # @rtransform! $AsTable = get_turn_profile(:t, :spl, :poi)

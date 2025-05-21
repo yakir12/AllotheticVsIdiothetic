@@ -131,7 +131,7 @@ end
 function get_tij(file)
     tij = CSV.File(joinpath(results_dir, file))
     t = range(tij.t[1], tij.t[end], length = length(tij))
-    pixels = DimVector(CameraCalibrations.RowCol.(tij.i, tij.j), (; t))
+    pixels = DimVector(CameraCalibrations.RowCol.(tij.i, tij.j), Ti(t))
 end
 
 # function remove_stops!(t, xy)
@@ -150,48 +150,47 @@ end
 #     return (; t, xy)
 # end
 #
-function remove_loops!(t, xy)
+function remove_loops(xy)
     inds, _ = self_intersections(Point2f.(xy))
-    ranges = splat(UnitRange).(Iterators.partition(inds, 2))
-    filter!(<(51) ∘ length, ranges)
-    tokill = vcat(ranges...)
+    rngs = splat(UnitRange).(Iterators.partition(inds, 2))
+    filter!(<(51) ∘ length, rngs)
+    tokill = vcat(rngs...)
     unique!(tokill)
     sort!(tokill)
-    deleteat!(t, tokill)
-    deleteat!(xy, tokill)
-    return (; t, xy)
+    keep::Vector{Int} = collect(eachindex(xy))
+    setdiff!(keep, tokill)
+    return xy[keep]
 end
 
-function sparseify(t, xy, poi)
-    spl = ParametricSpline(t, stack(xy))
+function sparseify(xy)
+    spl = ParametricSpline(lookup(xy, Ti), stack(xy))
     # tl = round(Int, t[1]):round(Int, t[end])
-    tl = range(t[1], t[end], step = 0.5)
+    tl = range(extrema(lookup(xy, Ti))..., step = 0.5)
     # poi_index = findfirst(==(round(Int, poi)), tl)
-    poi_index = findfirst(≥(poi), tl)
-    (; t = tl, xy = SV.(spl.(tl)), poi_index)
+    DimVector(SV.(spl.(tl)), Ti(tl))
 end
 
-function smooth(t, xy)
-    spl = ParametricSpline(t, stack(xy), k = 3, s = 25)
-    xys = SV.(spl.(t))
-    trans = Translation(-xys[1])
-    xys .= trans.(xys)
-    # t1 = t[1]
-    # t2 = t[end]
-    # xys1 = xys[1]
-    # xys2 = xys[end]
-    # remove_loops!(t, xys)
-    # if t[1] ≠ t1
-    #     pushfirst!(t, t1)
-    #     pushfirst!(xys, xys1)
-    # end
-    # if t[end] ≠ t2
-    #     push!(t, t2)
-    #     push!(xys, xys2)
-    # end
-    # xys .-= Ref(xys[1])
-    return (; xys, spl, trans)
-end
+# function smooth(xy)
+#     spl = ParametricSpline(lookup(xy, Ti), stack(xy), k = 3, s = 25)
+#     xys = SV.(spl.(lookup(xy, Ti)))
+#     trans = Translation(-xys[1])
+#     xys .= trans.(xys)
+#     # t1 = t[1]
+#     # t2 = t[end]
+#     # xys1 = xys[1]
+#     # xys2 = xys[end]
+#     # remove_loops!(t, xys)
+#     # if t[1] ≠ t1
+#     #     pushfirst!(t, t1)
+#     #     pushfirst!(xys, xys1)
+#     # end
+#     # if t[end] ≠ t2
+#     #     push!(t, t2)
+#     #     push!(xys, xys2)
+#     # end
+#     # xys .-= Ref(xys[1])
+#     return (; xys, spl, trans)
+# end
 
 
 
@@ -295,28 +294,53 @@ end
 #     return (; t, xy)
 # end
 
-function impute_poi_time(t, xy)
-    poi_index = something(findfirst(>(10) ∘ norm, xy .- Ref(xy[1])), length(xy))
-    t[poi_index]
-end
-
-function glue_intervention(xy, intervention)
-    t = val(DimensionalData.dims(xy, :t))
-    inter_i = something(findfirst(≥(intervention), t), length(t))
-    h = 2
-    diffs = diff(xy[1:inter_i + h + 1])
-    Δs = norm.(diffs)
-    μ = mean(Δs[1:inter_i - h])
-    σ = std(Δs[1:inter_i - h], mean = μ)
-    for i in inter_i - h:inter_i + h
-        if Δs[i] > μ + 1.5σ
-            Δxy = diffs[i] - μ*normalize(diffs[i])
-            xy[i + 1:end] .-= Ref(Δxy)
-            return Δs[i]
+function impute_poi_time(xy)
+    p1 = xy[1]
+    for i in eachindex(xy)
+        if norm(xy[i] - p1) > 10
+            return lookup(xy, Ti)[i - 1]
         end
     end
-    return missing
+    return last(lookup(xy, Ti))
 end
+
+function glue_intervention!(xy, intervention::Real)
+    h = 1
+    diffs = diff(xy[Ti = 0.0 .. intervention + h])
+    Δs = norm.(diffs)
+    μ = mean(Δs[Ti = 0.0 .. intervention - h])
+    σ = std(Δs[Ti = 0.0 .. intervention - h], mean = μ)
+    threshold = μ + 2σ
+    v = Δs[Ti = intervention - h .. intervention + h]
+    i = findfirst(>(threshold), v)
+    if isnothing(i)
+        return 0.0
+    else
+        t1 = lookup(v, Ti)[i]
+        step = diffs[Ti = At(t1)] - μ*normalize(diffs[Ti = At(t1)])
+        t2 = lookup(v, Ti)[i + 1]
+        xy[Ti = t2 .. Inf] .-= Ref(step)
+        return v[i]
+    end
+end
+
+# function glue_intervention(xy, intervention)
+#     t = val(DimensionalData.dims(xy, :t))
+#     inter_i = something(findfirst(≥(intervention), t), length(t))
+#     h = 2
+#     diffs = diff(xy[1:inter_i + h + 1])
+#     Δs = norm.(diffs)
+#     μ = mean(Δs[1:inter_i - h])
+#     σ = std(Δs[1:inter_i - h], mean = μ)
+#     for i in inter_i - h:inter_i + h
+#         if Δs[i] > μ + 1.5σ
+#             Δxy = diffs[i] - μ*normalize(diffs[i])
+#             xy[i + 1:end] .-= Ref(Δxy)
+#             return Δs[i]
+#         end
+#     end
+#     return missing
+# end
 
 # function glue_poi_index!(xy, t, poi::Float64)
 #     poi_index = something(findfirst(≥(poi), t), length(t))
@@ -335,10 +359,17 @@ end
 #     return xy .- Ref(xy[1])
 # end
 
-function get_rotation(p2)
+function get_rotation(xy, poi, center2start)
+    _xy = center2start.(xy)
+    p2 = _xy[Ti = Near(poi)]
     θ = π/2 - atan(reverse(p2)...)
     LinearMap(Angle2d(θ))
 end
+
+# function get_rotation(p2)
+#     θ = π/2 - atan(reverse(p2)...)
+#     LinearMap(Angle2d(θ))
+# end
 
 function get_smooth_center_poi_rotate(t, spl, poi_index)
     f = SV ∘ spl
