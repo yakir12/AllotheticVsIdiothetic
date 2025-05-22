@@ -65,21 +65,26 @@ leftjoin!(runs, calibs, on = :calibration_id)
     @transform! :xy = sparseify.(:xy)
     @rtransform! :spl = ParametricSpline(lookup(:xy, Ti), stack(:xy), k = 3, s = 25)
     @rtransform! :center2start = Translation(-SV(:spl(first(lookup(:xy, Ti)))))
-    @transform! :rotate2poi = get_rotation.(:xy, :poi, :center2start)
+    @transform! :center_and_rotate2poi = get_rotation.(:xy, :poi, :center2start)
+    @rtransform! :rotate_and_center2poi = Translation(-:center_and_rotate2poi(SV(:spl(:poi)))) ∘ :center_and_rotate2poi
     @transform! :dance_spontaneous = .!ismissing.(:spontaneous_end)
     @transform! :condition = string.(:light, " ", :dance_by, " ", :at_run)
+    @rtransform! :y2025 = Year(:start_datetime) == Year(2025) ? "2025" : "earlier"
 end
 
-    # @rtransform! :poi_index = something(findfirst(≥(:poi), :t), length(:t))
-    @rtransform! :xysr = :rot.(:xys)
-    @rtransform! :xysrc = :xysr[:poi_index:end] .- Ref(:xysr[:poi_index])
-    # @rtransform! $AsTable = get_turn_profile(:t, :spl, :poi)
-    # @rtransform! $AsTable = fit_logistic(:lθ, :θ)
-    # transform!(:ks => ByRow(identity) => [:L, :k, :x₀, :y₀])
-    # @rtransform! :θs = logistic.(:lθ, :L, :k, :x₀, :y₀)
-    @rtransform! :y2025 = Year(:start_datetime) == Year(2025) ? "2025" : "earlier"
-    @aside pregrouped(_.xys => first, _.xys => last)  * visual(Lines) * pregrouped(layout = _.run_id => nonnumeric) |> draw(figure = (;size = (1000, 1000)), axis = (;aspect = DataAspect())) |> save("summary.png")
-end
+
+askjdhfksahflksahls
+
+#     # @rtransform! :poi_index = something(findfirst(≥(:poi), :t), length(:t))
+#     @rtransform! :xysr = :rot.(:xys)
+#     @rtransform! :xysrc = :xysr[:poi_index:end] .- Ref(:xysr[:poi_index])
+#     # @rtransform! $AsTable = get_turn_profile(:t, :spl, :poi)
+#     # @rtransform! $AsTable = fit_logistic(:lθ, :θ)
+#     # transform!(:ks => ByRow(identity) => [:L, :k, :x₀, :y₀])
+#     # @rtransform! :θs = logistic.(:lθ, :L, :k, :x₀, :y₀)
+#     @rtransform! :y2025 = Year(:start_datetime) == Year(2025) ? "2025" : "earlier"
+#     @aside pregrouped(_.xys => first, _.xys => last)  * visual(Lines) * pregrouped(layout = _.run_id => nonnumeric) |> draw(figure = (;size = (1000, 1000)), axis = (;aspect = DataAspect())) |> save("summary.png")
+# end
 
 ############ plot the tyracks to check validity
 CairoMakie.activate!()
@@ -109,6 +114,7 @@ GLMakie.activate!()
 l = 50
 n = 10
 df = @chain runs begin
+    @rtransform :xys = :center2start.(SV.(:spl.()))
     @subset norm.(last.(:xys)) .> l
     @rtransform :xys = cropto(:t, :spl, :trans, l)
     @rtransform :xysr = :rot.(:xys)

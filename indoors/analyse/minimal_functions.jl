@@ -360,10 +360,9 @@ end
 # end
 
 function get_rotation(xy, poi, center2start)
-    _xy = center2start.(xy)
-    p2 = _xy[Ti = Near(poi)]
+    p2 = center2start(xy[Ti = Near(poi)])
     θ = π/2 - atan(reverse(p2)...)
-    LinearMap(Angle2d(θ))
+    LinearMap(Angle2d(θ)) ∘ center2start
 end
 
 # function get_rotation(p2)
