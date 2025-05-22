@@ -1,6 +1,59 @@
 const SV = SVector{2, Float64}
 
+function smooth(xy)
+    t = lookup(xy, Ti)
+    spl = ParametricSpline(t, stack(xy), k = 3, s = 25)
+    DimVector(SV.(spl.(t)), Ti(t))
+end
 
+function center2start(xy)
+    trans = Translation(-first(xy))
+    trans.(xy)
+end
+
+function intersection(orig, dir)
+    b = -orig⋅dir
+    disc = b^2 - orig⋅orig + 1
+    if disc ≥ 0
+        d = sqrt(disc)
+        t2 = b + d
+        if t2 ≥ 0
+            t1 = b - d
+            return t1 > 0 ? (t1, t2) : (Inf, t2)
+        end
+    end
+    return (Inf, Inf)
+end
+
+function cropto(xy, l)
+    i = findfirst(>(l) ∘ norm, xy)
+    isnothing(i) && return copy(xy)
+    p1 = xy[i - 1]
+    p2 = xy[i]
+    dir = normalize(p2 - p1)
+    _, d = intersection(p1/l, normalize(p2 - p1))
+    p2 = p1 + d*l*dir
+    cropped = xy[1:i]
+    cropped[i] = p2
+    return cropped
+end
+
+function rotate2poi(xy, poi)
+    p2 = xy[Ti = Near(poi)]
+    θ = π/2 - atan(reverse(p2)...)
+    rot = LinearMap(Angle2d(θ))
+    rot.(xy)
+end
+
+# function get_rotation(p2)
+#     θ = π/2 - atan(reverse(p2)...)
+#     LinearMap(Angle2d(θ))
+# end
+
+function center2poi_and_crop(xy, poi)
+    trans = Translation(-xy[Ti = Near(poi)])
+    trans.(xy[Ti = poi..Inf])
+end
 
 critical_r(n, p = 0.05) = sqrt(-4n * log(p) + 4n - log(p)^2 + 1)/(2n)
 
@@ -358,27 +411,6 @@ end
 #     xy = SV.(spl.(t))
 #     return xy .- Ref(xy[1])
 # end
-
-function get_rotation(xy, poi, center2start)
-    p2 = center2start(xy[Ti = Near(poi)])
-    θ = π/2 - atan(reverse(p2)...)
-    LinearMap(Angle2d(θ)) ∘ center2start
-end
-
-# function get_rotation(p2)
-#     θ = π/2 - atan(reverse(p2)...)
-#     LinearMap(Angle2d(θ))
-# end
-
-function get_smooth_center_poi_rotate(t, spl, poi_index)
-    f = SV ∘ spl
-    p1 = f(t[1])
-    p2 = f(t[poi_index])
-    trans = Translation(-p2)
-    p1 = trans(p1)
-    rot = get_rotation(p1)
-    return rot ∘ trans ∘ f
-end
 
 function get_exit_angle(xyp, r)
     i = findfirst(≥(r) ∘ norm, xyp)

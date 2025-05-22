@@ -22,6 +22,8 @@ GLMakie.activate!()
 
 include("minimal_functions.jl")
 
+const l = 50
+
 output = "dark"
 if isdir(output)
     rm.(readdir(output; join = true))
@@ -63,10 +65,11 @@ leftjoin!(runs, calibs, on = :calibration_id)
     @select! Not(:intervention)
     @transform! :xy = remove_loops.(:xy)
     @transform! :xy = sparseify.(:xy)
-    @rtransform! :spl = ParametricSpline(lookup(:xy, Ti), stack(:xy), k = 3, s = 25)
-    @rtransform! :center2start = Translation(-SV(:spl(first(lookup(:xy, Ti)))))
-    @transform! :center_and_rotate2poi = get_rotation.(:xy, :poi, :center2start)
-    @rtransform! :rotate_and_center2poi = Translation(-:center_and_rotate2poi(SV(:spl(:poi)))) ∘ :center_and_rotate2poi
+    @transform! :smooth = smooth.(:xy)
+    @transform! :centered2start = center2start.(:smooth)
+    @transform! :cropped = cropto.(:centered2start, l)
+    @transform! :rotated2poi = rotate2poi.(:cropped, :poi)
+    @transform! :centered2poi_and_cropped = center2poi_and_crop.(:rotated2poi, :poi)
     @transform! :dance_spontaneous = .!ismissing.(:spontaneous_end)
     @transform! :condition = string.(:light, " ", :dance_by, " ", :at_run)
     @rtransform! :y2025 = Year(:start_datetime) == Year(2025) ? "2025" : "earlier"
@@ -111,30 +114,40 @@ GLMakie.activate!()
 
 ################################################### 10 random tracks
 
-l = 50
 n = 10
 df = @chain runs begin
-    @rtransform :xys = :center2start.(SV.(:spl.()))
-    @subset norm.(last.(:xys)) .> l
-    @rtransform :xys = cropto(:t, :spl, :trans, l)
-    @rtransform :xysr = :rot.(:xys)
+    @subset norm.(last.(:cropped)) .≈ l
     @groupby :dance_by
     @transform :n = 1:length(:dance_by)
     @subset :n .≤ n
+    @transform :cropped = parent.(:cropped)
+    @transform :rotated2poi = parent.(:rotated2poi)
 end
 @assert all(==(n), combine(groupby(df, :dance_by), nrow).nrow)
 
-fig = pregrouped(df.xys => first => "X (cm)", df.xys => last => "Y (cm)", col = df.dance_by, color = df.y2025) * visual(Lines) |> draw(; axis = (; width = 400, height = 400))
+
+# df = DataFrame(tracks = [DimVector(rand(SVector{2, Float64}, 10), Ti(1:10)) for _ in 1:3], name = string.('a':'c')) 
+# pregrouped(df.tracks => first, df.tracks => last, color = df.name) * visual(Lines) |> draw()
+#
+# df = flatten(df, :tracks)
+# transform!(df, :tracks => [:x, :y])
+# data(df) * mapping(:x, :y, color = :name) * visual(Lines) |> draw()
+#
+# df = DataFrame(tracks = [rand(SVector{2, Float64}, 10) for _ in 1:3], name = string.('a':'c')) 
+# pregrouped(df.tracks => first, df.tracks => last, color = df.name) * visual(Lines) |> draw()
+
+fig = pregrouped(df.cropped => first => "X (cm)", df.cropped => last => "Y (cm)", col = df.dance_by, color = df.y2025) * visual(Lines) |> draw(; axis = (; width = 400, height = 400))
 for ax in fig.figure.content 
     if ax isa Axis
-        for r  in (30, 50)
+        for r  in (30, l)
             lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
         end
     end
 end
+
 save(joinpath(output, "figure1.png"), fig)
 
-fig = pregrouped(df.xysr => first => "X (cm)", df.xysr => last => "Y (cm)", col = df.dance_by, color = df.y2025) * visual(Lines) |> draw(; axis = (; width = 400, height = 400))
+fig = pregrouped(df.rotated2poi => first => "X (cm)", df.rotated2poi => last => "Y (cm)", col = df.dance_by, color = df.y2025) * visual(Lines) |> draw(; axis = (; width = 400, height = 400))
 for ax in fig.figure.content 
     if ax isa Axis
         for r  in (30, 50)
@@ -150,7 +163,8 @@ save(joinpath(output, "figure1a.png"), fig)
 
 ######################## Figure 2
 
-fig = pregrouped(runs.xysr => first => "X (cm)", runs.xysr => last => "Y (cm)", col = runs.condition, color = runs.y2025) * visual(Lines) |> draw(; figure = (; size = (1200, 300)), axis=(aspect=DataAspect(), limits = (nothing, (-5, nothing))))
+df = @transform runs :rotated2poi = parent.(:rotated2poi)
+fig = pregrouped(df.rotated2poi => first => "X (cm)", df.rotated2poi => last => "Y (cm)", col = df.condition, color = df.y2025) * visual(Lines) |> draw(; figure = (; size = (1200, 300)), axis=(aspect=DataAspect(), limits = (nothing, (-5, nothing))))
 for ax in fig.figure.content 
     if ax isa Axis
         for r  in (30, 50)
