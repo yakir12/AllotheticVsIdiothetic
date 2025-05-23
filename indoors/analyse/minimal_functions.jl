@@ -1,227 +1,3 @@
-const SV = SVector{2, Float64}
-
-function smooth(xy)
-    t = lookup(xy, Ti)
-    spl = ParametricSpline(t, stack(xy), k = 3, s = 25)
-    DimVector(SV.(spl.(t)), Ti(t))
-end
-
-function center2start(xy)
-    trans = Translation(-first(xy))
-    trans.(xy)
-end
-
-function intersection(orig, dir)
-    b = -orig⋅dir
-    disc = b^2 - orig⋅orig + 1
-    if disc ≥ 0
-        d = sqrt(disc)
-        t2 = b + d
-        if t2 ≥ 0
-            t1 = b - d
-            return t1 > 0 ? (t1, t2) : (Inf, t2)
-        end
-    end
-    return (Inf, Inf)
-end
-
-function cropto(xy, l)
-    i = findfirst(>(l) ∘ norm, xy)
-    isnothing(i) && return copy(xy)
-    p1 = xy[i - 1]
-    p2 = xy[i]
-    dir = normalize(p2 - p1)
-    _, d = intersection(p1/l, normalize(p2 - p1))
-    p2 = p1 + d*l*dir
-    cropped = xy[1:i]
-    cropped[i] = p2
-    return cropped
-end
-
-function rotate2poi(xy, poi)
-    p2 = xy[Ti = Near(poi)]
-    θ = π/2 - atan(reverse(p2)...)
-    rot = LinearMap(Angle2d(θ))
-    rot.(xy)
-end
-
-# function get_rotation(p2)
-#     θ = π/2 - atan(reverse(p2)...)
-#     LinearMap(Angle2d(θ))
-# end
-
-function center2poi_and_crop(xy, poi)
-    trans = Translation(-xy[Ti = Near(poi)])
-    trans.(xy[Ti = poi..Inf])
-end
-
-critical_r(n, p = 0.05) = sqrt(-4n * log(p) + 4n - log(p)^2 + 1)/(2n)
-
-function _bootstrap(df)
-    n = nrow(df)
-    df2 = flatten(df[sample(1:n, n), :], [:θs, :r])
-    df3 = combine(groupby(df2, [:light, :dance_by, :r]), :θs => mean_resultant_vector => :mean_resultant_vector)
-    df3.light = categorical(df3.light)
-    levels!(df3.light, ["remain", "dark"])
-    df3.dance_by = categorical(df3.dance_by)
-    levels!(df3.dance_by, ["no", "hold", "disrupt"])
-    try
-        m = BetaRegression.fit(BetaRegressionModel, fm, df3)
-        tbl = coeftable(m)
-        row = (; Pair.(Symbol.(tbl.rownms), tbl.cols[tbl.pvalcol])...)
-        # row = tbl.cols[tbl.pvalcol]
-        (row,  predict(m, newdf))
-    catch ex
-        missing
-    end
-end
-
-# function _bootstrap(df)
-#     n = nrow(df)
-#     df2 = flatten(df[sample(1:n, n), :], [:θs, :r])
-#     df3 = combine(groupby(df2, [:condition, :r]), :θs => mean_resultant_vector => :mean_resultant_vector)
-#     df3.condition = categorical(df3.condition)
-#     levels!(df3.condition, ["remain", "no", "hold", "disrupt"])
-#     try
-#         m = BetaRegression.fit(BetaRegressionModel, fm, df3)
-#         tbl = coeftable(m)
-#         row = (; Pair.(Symbol.(tbl.rownms), tbl.cols[tbl.pvalcol])...)
-#         # row = tbl.cols[tbl.pvalcol]
-#         (row,  predict(m, newdf))
-#     catch ex
-#         missing
-#     end
-# end
-function bootstrap(df)
-    n = 10_000
-    row, y = _bootstrap(df)
-    rows = DataFrame(Dict(pairs(row)))
-    empty!(rows)
-    ys = Matrix{Float64}(undef, nrow(newdf), n)
-    i = 0
-    while i < n
-        rowy = _bootstrap(df)
-        if ismissing(rowy)
-            continue
-        else
-            i += 1
-            row, ys[:, i] = rowy
-            push!(rows, row)
-        end
-    end
-    return rows, stack(ys)
-end
-
-function formatp(p)
-    if p > 0.05
-        ">0.05"
-    elseif p > 0.001
-        string(round(p, sigdigits = 2))
-    else
-        "<0.001"
-    end
-end
-
-function stats(x)
-    p = something(findfirst(>(0.05), sort!(x)), length(x))/length(x)
-    q1, med, q2 = quantile(x, [0.025, 0.5, 0.975])
-    mod = mode(x)
-    μ = mean(x)
-    [string(round(Int, 100p), "%"), formatp(q1), formatp(med), formatp(q2), formatp(mod), formatp(μ)]
-end
-
-function trectify(fs, xs)
-    n = length(xs)
-    ys = Vector{DimVector{SV}}.(undef, n)
-    Threads.@threads for i in 1:n
-        y = fs[i].(xs[i])
-        y .-= Ref(y[1])
-        ys[i] = y
-    end
-    return ys
-end
-
-
-
-function get_calibration(calibration_id)
-    c = CameraCalibrations.load(joinpath(results_dir, calibration_id))
-    f = rectification(c)
-    # fun(ij)::Function = f.(ij)
-    return f
-end
-
-tosecond(t::T) where {T <: TimePeriod} = t / convert(T, Dates.Second(1))
-tosecond(t::TimeType) = tosecond(t - Time(0))
-tosecond(sec::Real) = sec
-
-# function get_txy(tij_file, rectify)
-#     tij = CSV.File(joinpath(results_dir, tij_file))
-#     t = range(tij.t[1], tij.t[end], length = length(tij))
-#     ij = SVector{2, Int}.(tij.i, tij.j)
-#     xy = rectify.(ij)
-#     (; t, xy)
-# end
-
-function has_stops(ij)
-    for i in 2:length(ij)
-        if ij[i] == ij[i - 1]
-            return true
-        end
-    end
-    return false
-end
-
-function remove_stops(ij)
-    keep = [1]
-    for i in 2:length(ij)
-        if ij[i] ≠ ij[i - 1]
-            push!(keep, i)
-        end
-    end
-    ij[keep]
-end
-
-function get_tij(file)
-    tij = CSV.File(joinpath(results_dir, file))
-    t = range(tij.t[1], tij.t[end], length = length(tij))
-    pixels = DimVector(CameraCalibrations.RowCol.(tij.i, tij.j), Ti(t))
-end
-
-# function remove_stops!(t, xy)
-#     tokill = Int[]
-#     last_xy = xy[1]
-#     for i in 2:length(t)
-#         Δ = norm(xy[i] - last_xy)
-#         if Δ > 0.1
-#             last_xy = xy[i]
-#         else
-#             push!(tokill, i)
-#         end
-#     end
-#     deleteat!(t, tokill)
-#     deleteat!(xy, tokill)
-#     return (; t, xy)
-# end
-#
-function remove_loops(xy)
-    inds, _ = self_intersections(Point2f.(xy))
-    rngs = splat(UnitRange).(Iterators.partition(inds, 2))
-    filter!(<(51) ∘ length, rngs)
-    tokill = vcat(rngs...)
-    unique!(tokill)
-    sort!(tokill)
-    keep::Vector{Int} = collect(eachindex(xy))
-    setdiff!(keep, tokill)
-    return xy[keep]
-end
-
-function sparseify(xy)
-    spl = ParametricSpline(lookup(xy, Ti), stack(xy))
-    # tl = round(Int, t[1]):round(Int, t[end])
-    tl = range(extrema(lookup(xy, Ti))..., step = 0.5)
-    # poi_index = findfirst(==(round(Int, poi)), tl)
-    DimVector(SV.(spl.(tl)), Ti(tl))
-end
 
 # function smooth(xy)
 #     spl = ParametricSpline(lookup(xy, Ti), stack(xy), k = 3, s = 25)
@@ -347,35 +123,6 @@ end
 #     return (; t, xy)
 # end
 
-function impute_poi_time(xy)
-    p1 = xy[1]
-    for i in eachindex(xy)
-        if norm(xy[i] - p1) > 10
-            return lookup(xy, Ti)[i - 1]
-        end
-    end
-    return last(lookup(xy, Ti))
-end
-
-function glue_intervention!(xy, intervention::Real)
-    h = 1
-    diffs = diff(xy[Ti = 0.0 .. intervention + h])
-    Δs = norm.(diffs)
-    μ = mean(Δs[Ti = 0.0 .. intervention - h])
-    σ = std(Δs[Ti = 0.0 .. intervention - h], mean = μ)
-    threshold = μ + 2σ
-    v = Δs[Ti = intervention - h .. intervention + h]
-    i = findfirst(>(threshold), v)
-    if isnothing(i)
-        return 0.0
-    else
-        t1 = lookup(v, Ti)[i]
-        step = diffs[Ti = At(t1)] - μ*normalize(diffs[Ti = At(t1)])
-        t2 = lookup(v, Ti)[i + 1]
-        xy[Ti = t2 .. Inf] .-= Ref(step)
-        return v[i]
-    end
-end
 
 # function glue_intervention(xy, intervention)
 #     t = val(DimensionalData.dims(xy, :t))
@@ -412,15 +159,6 @@ end
 #     return xy .- Ref(xy[1])
 # end
 
-function get_exit_angle(xyp, r)
-    i = findfirst(≥(r) ∘ norm, xyp)
-    if isnothing(i)
-        return missing
-    end
-    x, y = xyp[i]
-    atan(y, x)
-end
-
 # function get_exit_angle(xyp, l)
 #     ls = get_pathlength(xyp)
 #     i = findfirst(≥(l), ls)
@@ -430,10 +168,6 @@ end
 #     x, y = xyp[i]
 #     atan(y, x)
 # end
-
-function mean_resultant_vector(θ)
-    norm(mean(SV ∘ sincos, θ))
-end
 
 
 function get_turn_profile(t, spl, poi)
@@ -486,16 +220,16 @@ function unwrap!(x, period = 2π)
     return x
 end
 
-function cropto(t, spl, trans, l)
-    i = findlast(<(l) ∘ norm ∘ trans ∘ SV ∘ spl, t)
-    t1 = t[i]
-    t2 = t[i+1]
-    fun(t) = abs2(norm(trans(SV(spl(t)))) - l)
-    res = optimize(fun, t1, t2)
-    tend = Optim.minimizer(res)
-    tl = range(t[1], tend, i)
-    trans.(SV.(spl.(tl)))
-end
+# function cropto(t, spl, trans, l)
+#     i = findlast(<(l) ∘ norm ∘ trans ∘ SV ∘ spl, t)
+#     t1 = t[i]
+#     t2 = t[i+1]
+#     fun(t) = abs2(norm(trans(SV(spl(t)))) - l)
+#     res = optimize(fun, t1, t2)
+#     tend = Optim.minimizer(res)
+#     tl = range(t[1], tend, i)
+#     trans.(SV.(spl.(tl)))
+# end
 
 function guess_logistic(x, y)
     ymin, ymax = extrema(y)

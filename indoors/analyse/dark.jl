@@ -20,7 +20,8 @@ using DimensionalData
 
 GLMakie.activate!()
 
-include("minimal_functions.jl")
+include("general_functions.jl")
+include("dark_functions.jl")
 
 const l = 50
 
@@ -46,21 +47,24 @@ end
 leftjoin!(runs, calibs, on = :calibration_id)
 @chain runs begin
     @select! Not(:calibration_id)
+    @transform! :dance_spontaneous = .!ismissing.(:spontaneous_end)
+    @transform! :condition = string.(:light, " ", :dance_by, " ", :at_run)
+    @rtransform! :y2025 = Year(:start_datetime) == Year(2025) ? "2025" : "earlier"
     @rename! :intervention = :poi
-    @rtransform! :pixels = get_tij(:tij_file)
-    @rtransform! :pixels = remove_stops(:pixels)
+    @transform! :pixels = get_tij.(:tij_file)
+    @transform! :pixels = remove_stops.(:pixels)
     # @aside @assert !any(has_stops, _.pixels) "some stops remain?!" # convert to a test
-    @transform! :xy = trectify(:rectify, :pixels)
+    @rtransform! :xy = :rectify.(:pixels)
     @aside @chain _ begin 
         @subset(:dance_by .≠ "no"; view = true)
-        @rtransform! :jump = glue_intervention!(:xy, :intervention)
+        @transform! :jump = glue_intervention!.(:xy, :intervention)
     end
     @aside @chain _ begin 
         @subset(:light .== "remain"; view = true)
-        @rtransform! :intervention = impute_poi_time(:xy)
+        @transform! :intervention = impute_poi_time.(:xy)
     end
-    @rtransform! :spontaneous_end = passmissing(tosecond)(:spontaneous_end)
-    @rtransform! :poi = coalesce(:spontaneous_end, :intervention)
+    @transform! :spontaneous_end = passmissing(tosecond).(:spontaneous_end)
+    @transform! :poi = coalesce.(:spontaneous_end, :intervention)
     disallowmissing!(:poi)
     @select! Not(:intervention)
     @transform! :xy = remove_loops.(:xy)
@@ -71,47 +75,12 @@ leftjoin!(runs, calibs, on = :calibration_id)
     @transform! :rotated2poi = rotate2poi.(:cropped, :poi)
     @transform! :centered2poi_and_cropped = center2poi_and_crop.(:rotated2poi, :poi)
     transform!([:pixels, :xy, :smooth, :centered2start, :cropped, :rotated2poi, :centered2poi_and_cropped] .=> ByRow(parent), renamecols = false)
-    @transform! :dance_spontaneous = .!ismissing.(:spontaneous_end)
-    @transform! :condition = string.(:light, " ", :dance_by, " ", :at_run)
-    @rtransform! :y2025 = Year(:start_datetime) == Year(2025) ? "2025" : "earlier"
 end
-
-
-askjdhfksahflksahls
-
-#     # @rtransform! :poi_index = something(findfirst(≥(:poi), :t), length(:t))
-#     @rtransform! :xysr = :rot.(:xys)
-#     @rtransform! :xysrc = :xysr[:poi_index:end] .- Ref(:xysr[:poi_index])
-#     # @rtransform! $AsTable = get_turn_profile(:t, :spl, :poi)
-#     # @rtransform! $AsTable = fit_logistic(:lθ, :θ)
-#     # transform!(:ks => ByRow(identity) => [:L, :k, :x₀, :y₀])
-#     # @rtransform! :θs = logistic.(:lθ, :L, :k, :x₀, :y₀)
-#     @rtransform! :y2025 = Year(:start_datetime) == Year(2025) ? "2025" : "earlier"
-#     @aside pregrouped(_.xys => first, _.xys => last)  * visual(Lines) * pregrouped(layout = _.run_id => nonnumeric) |> draw(figure = (;size = (1000, 1000)), axis = (;aspect = DataAspect())) |> save("summary.png")
-# end
 
 ############ plot the tyracks to check validity
-CairoMakie.activate!()
-path = "tmp"
-mkpath(path)
-rm.(readdir(path, join = true))
-Threads.@threads for row in eachrow(runs)
-    run_id, xy, xys, poi_index, dance_by = (row.run_id, row.xy, row.xys, row.poi_index, row.dance_by)
-    # run_id, xy, xys, poi_index, lθ, θ, θs, lpoi, lpoi_index, dance_by = (row.run_id, row.xy, row.xys, row.poi_index, row.lθ, row.θ, row.θs, row.lpoi, row.lpoi_index, row.dance_by)
-    fig = Figure()
-    ax = Axis(fig[1,1], aspect = DataAspect(), title = dance_by)
-    lines!(ax, xy[1:poi_index], color = :black)
-    lines!(ax, xy[poi_index:end], color = :gray)
-    lines!(ax, xys[1:poi_index], color = :red)
-    lines!(ax, xys[poi_index:end], color = :orange)
-    # ax = Axis(fig[1,2])
-    # lines!(ax, lθ[1:lpoi_index], rad2deg.(θ[1:lpoi_index]), color = :black)
-    # lines!(ax, lθ[lpoi_index:end], rad2deg.(θ[lpoi_index:end]), color = :gray)
-    # lines!(ax, lθ[1:lpoi_index], rad2deg.(θs[1:lpoi_index]), color = :red)
-    # lines!(ax, lθ[lpoi_index:end], rad2deg.(θs[lpoi_index:end]), color = :orange)
-    save(joinpath(path, "$(run_id).png"), fig)
-end
-GLMakie.activate!()
+
+fig = (pregrouped(runs.smooth => first => "X (cm)", runs.smooth => last => "Y (cm)", layout = runs.run_id => nonnumeric) * visual(Lines; color = :red) + pregrouped(runs.xy => first => "X (cm)", runs.xy => last => "Y (cm)", layout = runs.run_id => nonnumeric) * visual(Lines)) |> draw(; axis = (; width = 400, height = 400, limits = ((-l, l), (-l, l))));
+save(joinpath(output, "overview.png"), fig)
 
 ################################################### 10 random tracks
 
@@ -146,9 +115,6 @@ end
 save(joinpath(output, "figure1a.png"), fig)
 
 
-################################################### raw data for turning angles
-
-
 ######################## Figure 2
 
 fig = pregrouped(runs.rotated2poi => first => "X (cm)", runs.rotated2poi => last => "Y (cm)", col = runs.condition, color = runs.y2025) * visual(Lines) |> draw(; figure = (; size = (1200, 300)), axis=(aspect=DataAspect(), limits = (nothing, (-5, nothing))))
@@ -177,8 +143,9 @@ levels!(df.light, ["remain", "dark"])
 df.dance_by = categorical(df.dance_by)
 levels!(df.dance_by, ["no", "hold", "disrupt"])
 
-R = 60
-fig = pregrouped(df.centered2poi_and_cropped => first => "X (cm)", df.centered2poi_and_cropped => last => "Y (cm)", col = df.light => renamer("remain" => "Lights on", "dark" => "Lights off"), row = df.dance_by => renamer("no" => "Nothing", "hold" => "Holding ball", "disrupt" => "Removing from ball")) * visual(Lines) |> draw(; axis=(width = 300, height = 300, limits = ((-R, R), (-R, R))))
+# R = 60
+# fig = pregrouped(df.centered2poi_and_cropped => first => "X (cm)", df.centered2poi_and_cropped => last => "Y (cm)", col = df.light => renamer("remain" => "Lights on", "dark" => "Lights off"), row = df.dance_by => renamer("no" => "Nothing", "hold" => "Holding ball", "disrupt" => "Removing from ball")) * visual(Lines) |> draw(; axis=(width = 300, height = 300, limits = ((-R, R), (-R, R))))
+
 # , width = 300, height = 300
 
 save(joinpath(output, "figure2a.png"), fig)
@@ -252,7 +219,7 @@ y = quantile.(skipmissing.(eachrow(c)), Ref([0.025, 0.5, 0.975]))
 newdf.lower .= getindex.(y, 1)
 newdf.mean_resultant_vector .= getindex.(y, 2)
 newdf.upper .= getindex.(y, 3)
-pvalues = combine(pc, All() .=> stats, renamecols = false)
+pvalues = combine(pc, DataFrames.All() .=> stats, renamecols = false)
 pvalues.what = ["proportion", "Q2.5", "median", "Q97.5", "mode", "mean"]
 df2 = stack(pvalues, Not(:what), variable_name = :source)
 pvalues = combine(groupby(df2, :source), [:what, :value] => ((what, value) -> (; Pair.(Symbol.(what), value)...)) => ["proportion", "Q2.5", "median", "Q97.5", "mode", "mean"])
