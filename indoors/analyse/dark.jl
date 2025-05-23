@@ -70,6 +70,7 @@ leftjoin!(runs, calibs, on = :calibration_id)
     @transform! :cropped = cropto.(:centered2start, l)
     @transform! :rotated2poi = rotate2poi.(:cropped, :poi)
     @transform! :centered2poi_and_cropped = center2poi_and_crop.(:rotated2poi, :poi)
+    transform!([:pixels, :xy, :smooth, :centered2start, :cropped, :rotated2poi, :centered2poi_and_cropped] .=> ByRow(parent), renamecols = false)
     @transform! :dance_spontaneous = .!ismissing.(:spontaneous_end)
     @transform! :condition = string.(:light, " ", :dance_by, " ", :at_run)
     @rtransform! :y2025 = Year(:start_datetime) == Year(2025) ? "2025" : "earlier"
@@ -120,21 +121,8 @@ df = @chain runs begin
     @groupby :dance_by
     @transform :n = 1:length(:dance_by)
     @subset :n .≤ n
-    @transform :cropped = parent.(:cropped)
-    @transform :rotated2poi = parent.(:rotated2poi)
 end
 @assert all(==(n), combine(groupby(df, :dance_by), nrow).nrow)
-
-
-# df = DataFrame(tracks = [DimVector(rand(SVector{2, Float64}, 10), Ti(1:10)) for _ in 1:3], name = string.('a':'c')) 
-# pregrouped(df.tracks => first, df.tracks => last, color = df.name) * visual(Lines) |> draw()
-#
-# df = flatten(df, :tracks)
-# transform!(df, :tracks => [:x, :y])
-# data(df) * mapping(:x, :y, color = :name) * visual(Lines) |> draw()
-#
-# df = DataFrame(tracks = [rand(SVector{2, Float64}, 10) for _ in 1:3], name = string.('a':'c')) 
-# pregrouped(df.tracks => first, df.tracks => last, color = df.name) * visual(Lines) |> draw()
 
 fig = pregrouped(df.cropped => first => "X (cm)", df.cropped => last => "Y (cm)", col = df.dance_by, color = df.y2025) * visual(Lines) |> draw(; axis = (; width = 400, height = 400))
 for ax in fig.figure.content 
@@ -163,8 +151,7 @@ save(joinpath(output, "figure1a.png"), fig)
 
 ######################## Figure 2
 
-df = @transform runs :rotated2poi = parent.(:rotated2poi)
-fig = pregrouped(df.rotated2poi => first => "X (cm)", df.rotated2poi => last => "Y (cm)", col = df.condition, color = df.y2025) * visual(Lines) |> draw(; figure = (; size = (1200, 300)), axis=(aspect=DataAspect(), limits = (nothing, (-5, nothing))))
+fig = pregrouped(runs.rotated2poi => first => "X (cm)", runs.rotated2poi => last => "Y (cm)", col = runs.condition, color = runs.y2025) * visual(Lines) |> draw(; figure = (; size = (1200, 300)), axis=(aspect=DataAspect(), limits = (nothing, (-5, nothing))))
 for ax in fig.figure.content 
     if ax isa Axis
         for r  in (30, 50)
@@ -181,17 +168,17 @@ save(joinpath(output, "figure2.png"), fig)
 df = @subset runs :at_run .== 1
 # @rtransform! df :condition = :light == "remain" ? "remain" : :dance_by
 nr = 3
-l = floor(Int, minimum(norm ∘ last, df.xysrc))
-rl = range(1e-3, l, nr)
-transform!(df, :xysrc => ByRow(xysrc -> get_exit_angle.(Ref(xysrc), rl)) => :θs)
-select!(df, Cols(:light, :dance_by, :θs, :xysrc))
+l1 = floor(Int, minimum(norm ∘ last, df.centered2poi_and_cropped))
+rl = range(1e-3, l1, nr)
+transform!(df, :centered2poi_and_cropped => ByRow(xy -> get_exit_angle.(Ref(xy), rl)) => :θs)
+select!(df, Cols(:light, :dance_by, :θs, :centered2poi_and_cropped))
 df.light = categorical(df.light)
 levels!(df.light, ["remain", "dark"])
 df.dance_by = categorical(df.dance_by)
 levels!(df.dance_by, ["no", "hold", "disrupt"])
 
 R = 60
-fig = pregrouped(df.xysrc => first => "X (cm)", df.xysrc => last => "Y (cm)", col = df.light => renamer("remain" => "Lights on", "dark" => "Lights off"), row = df.dance_by => renamer("no" => "Nothing", "hold" => "Holding ball", "disrupt" => "Removing from ball")) * visual(Lines) |> draw(; axis=(width = 300, height = 300, limits = ((-R, R), (-R, R))))
+fig = pregrouped(df.centered2poi_and_cropped => first => "X (cm)", df.centered2poi_and_cropped => last => "Y (cm)", col = df.light => renamer("remain" => "Lights on", "dark" => "Lights off"), row = df.dance_by => renamer("no" => "Nothing", "hold" => "Holding ball", "disrupt" => "Removing from ball")) * visual(Lines) |> draw(; axis=(width = 300, height = 300, limits = ((-R, R), (-R, R))))
 # , width = 300, height = 300
 
 save(joinpath(output, "figure2a.png"), fig)
@@ -203,7 +190,7 @@ for ((light, dance_by), g) in pairs(groupby(df, [:light, :dance_by]))
     i = findfirst(==(dance_by), levels(df.dance_by))
     j = findfirst(==(light), levels(df.light))
     ax = PolarAxis(fig[i, j], rlimits = (0, 44), width = 300, height = 300)
-    for xy in g.xysrc
+    for xy in g.centered2poi_and_cropped
         θ = splat(atan).(xy) .+ π/2
         r = norm.(xy)
         lines!(ax, θ, r, color = :black)
@@ -220,7 +207,7 @@ resize_to_layout!(fig)
 save(joinpath(output, "figure2b.png"), fig)
 
 
-select!(df, Not(:xysrc))
+select!(df, Not(:centered2poi_and_cropped))
 # select!(df, Cols(:condition, :θs))
 df.r .= Ref(rl)
 
@@ -285,7 +272,7 @@ df2 = combine(groupby(df, [:light, :dance_by]), nrow)
 # + data(df2) * mapping(:r̄, col = :light, color = :dance_by => renamer("no" => "No disruption", "hold" => "Hold", "disrupt" => "Taken off ball") => "Light") * visual(HLines) 
 #, yticks = ([0; sort(df2.r̄); 0.5; 1], ["0", "", "", "", "", "0.5", "1"]
 
-fig = data(newdf) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, group = [:light, :dance_by], col = :light => renamer("remain" => "Lights on", "dark" => "Lights off"), color = :dance_by => renamer("no" => "Nothing", "hold" => "Holding ball", "disrupt" => "Removing from ball") => "Dance induced by") * visual(LinesFill) |> draw(; axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = ((0, l), (0, 1))))
+fig = data(newdf) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, group = [:light, :dance_by], col = :light => renamer("remain" => "Lights on", "dark" => "Lights off"), color = :dance_by => renamer("no" => "Nothing", "hold" => "Holding ball", "disrupt" => "Removing from ball") => "Dance induced by") * visual(LinesFill) |> draw(; axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = ((0, l1), (0, 1))))
 
 
 
