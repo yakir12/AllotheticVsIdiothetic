@@ -38,6 +38,7 @@ runs = @chain joinpath(results_dir, "runs.csv") begin
     CSV.read(DataFrame)
     @select Not(:runs_path, :start_location, :fps, :target_width, :runs_file, :window_size)
     @subset :light .≠ "shift"
+
 end
 calibs = @chain joinpath(results_dir, "calibs.csv") begin
     CSV.read(DataFrame)
@@ -77,7 +78,7 @@ leftjoin!(runs, calibs, on = :calibration_id)
     transform!([:pixels, :xy, :smooth, :centered2start, :cropped, :rotated2poi, :centered2poi_and_cropped] .=> ByRow(parent), renamecols = false)
 end
 
-############ plot the tyracks to check validity
+############ plot the tracks to check validity
 
 fig = (pregrouped(runs.smooth => first => "X (cm)", runs.smooth => last => "Y (cm)", layout = runs.run_id => nonnumeric) * visual(Lines; color = :red) + pregrouped(runs.xy => first => "X (cm)", runs.xy => last => "Y (cm)", layout = runs.run_id => nonnumeric) * visual(Lines)) |> draw(; axis = (; width = 400, height = 400, limits = ((-l, l), (-l, l))));
 save(joinpath(output, "overview.png"), fig)

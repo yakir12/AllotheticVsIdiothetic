@@ -169,57 +169,6 @@
 #     atan(y, x)
 # end
 
-
-function get_turn_profile(t, spl, poi)
-    n = 1000
-    tl = range(t[1], t[end], n)
-    poi_index = findfirst(≥(poi), tl)
-    l = get_pathlength(SV.(spl.(tl)))
-    l1 = l[poi_index] - 5 # 5 cm beofe the poi
-    i1 = findfirst(≥(l1), l)
-    l2 = l[poi_index] + 15 # 5 cm beofe the poi
-    i2 = something(findfirst(≥(l2), l), n)
-    θ = [atan(reverse(derivative(spl, tl[i]))...) for i in i1:i2]
-    unwrap!(θ)
-    lpoi = l[poi_index]
-    lθ = l[i1:i2]
-    lpoi_index = findfirst(≥(lpoi), lθ)
-    return (; lpoi_index, lpoi, lθ, θ)
-end
-
-# function arclength(spl, t1, t2; kws...)
-#     knots = get_knots(spl)
-#     filter!(t -> t1 < t < t2, knots)
-#     pushfirst!(knots, t1)
-#     push!(knots, t2)
-#     s, _ = quadgk(t -> norm(derivative(spl, t)), knots; kws...)
-#     return s
-# end
-
-# function get_pathlength(t, spl)
-#     n = length(t)
-#     l = zeros(n)
-#     for i in 2:n
-#         l[i] = arclength(spl, t[i-1], t[i])
-#     end
-#     return cumsum(l)
-# end
-
-function get_pathlength(xys)
-    l = cumsum(norm.(diff(xys)))
-    pushfirst!(l, 0.0)
-    return l
-end
-
-function unwrap!(x, period = 2π)
-    y = convert(eltype(x), period)
-    v = first(x)
-    for k = eachindex(x)
-        x[k] = v = v + rem(x[k] - v,  y, RoundNearest)
-    end
-    return x
-end
-
 # function cropto(t, spl, trans, l)
 #     i = findlast(<(l) ∘ norm ∘ trans ∘ SV ∘ spl, t)
 #     t1 = t[i]
@@ -230,25 +179,6 @@ end
 #     tl = range(t[1], tend, i)
 #     trans.(SV.(spl.(tl)))
 # end
-
-function guess_logistic(x, y)
-    ymin, ymax = extrema(y)
-    x₀i = last(findmax(log.(1 ./ abs.(y .- (ymax - ymin)/2 .- ymin))))
-    p0 = Float64[ymax - ymin, -1^(mean(y) > y[1]), x[x₀i], -ymin]
-end
-
-function fit_logistic(l, θ)
-    p0 = guess_logistic(l, θ)
-    # @show p0
-    lb = Float64[0, -10, l[1], -20]
-    ub = Float64[20, 10, l[end], 20]
-    fit = curve_fit(logistic, l, θ, p0, lower = lb, upper = ub)
-    tss = sum(abs2, θ .- mean(θ))
-    (; ks = LsqFit.coef(fit), logistic_rsquare = 1 - LsqFit.rss(fit)/tss)
-end
-
-logistic(x, L, k, x₀, y₀) = L / (1 + exp(-k*(x - x₀))) - y₀
-logistic(x, p) = logistic.(x, p...)
 
 inv_logistic(y, L, k, x₀, y₀) = log(L/(y + y₀) - 1) / (-k) + x₀
 

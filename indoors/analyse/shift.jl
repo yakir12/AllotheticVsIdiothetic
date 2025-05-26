@@ -1,7 +1,6 @@
 using AlgebraOfGraphics, GLMakie, CairoMakie
 using GLM
 # using MultivariateStats
-
 using DataFramesMeta, Chain
 using HypothesisTests
 using GeometryBasics
@@ -17,39 +16,30 @@ using Distributions
 using IntervalSets
 using QuadGK
 using BetaRegression
+using DimensionalData
 
 GLMakie.activate!()
 
-include("minimal_functions.jl")
+include("general_functions.jl")
+include("shift_functions.jl")
 
-output = "figures"
+const l = 50
+
+output = "shift"
 if isdir(output)
     rm.(readdir(output; join = true))
 else
-    mkdir("figures")
+    mkdir(output)
 end
 
 const results_dir = "../track_calibrate/tracks and calibrations"
 
-function combine_factors(light, induced, run)
-    induced = induced ? " induced" : ""
-    run = run > 1 ? " $run" : ""
-    string(light, induced, run)
-end
-
-function convert_dance_by_to_binary(dance_by)
-    dance_by == "disrupt" && return true
-    dance_by == "no" && return false
-    error("third dance_by option: $dance_by")
-end
-
 runs = @chain joinpath(results_dir, "runs.csv") begin
     CSV.read(DataFrame)
-    @subset :light .== "shift"
-    @transform :dance_induced = convert_dance_by_to_binary.(:dance_by)
     @select Not(:runs_path, :start_location, :fps, :target_width, :runs_file, :window_size)
+    @subset :light .== "shift"
+    # @transform :dance_induced = convert_dance_by_to_binary.(:dance_by)
 end
-
 calibs = @chain joinpath(results_dir, "calibs.csv") begin
     CSV.read(DataFrame)
     @transform :rectify = get_calibration.(:calibration_id)
@@ -58,35 +48,41 @@ end
 leftjoin!(runs, calibs, on = :calibration_id)
 @chain runs begin
     @select! Not(:calibration_id)
+    @transform! :dance_spontaneous = .!ismissing.(:spontaneous_end)
+    @transform! :condition = string.(:light, " ", :dance_by, " ", :at_run)
+    @rtransform! :y2025 = Year(:start_datetime) == Year(2025) ? "2025" : "earlier"
     @rename! :intervention = :poi
-    @rtransform! $AsTable = get_tij(:tij_file)
-    @rtransform! $AsTable = remove_stops!(:t, :ij)
-    @transform! :xy = trectify(:rectify, :ij)
+    @transform! :pixels = get_tij.(:tij_file)
+    @transform! :pixels = remove_stops.(:pixels)
+    # @aside @assert !any(has_stops, _.pixels) "some stops remain?!" # convert to a test
+    @rtransform! :xy = :rectify.(:pixels)
     @aside @chain _ begin 
-        @subset(:dance_induced; view = true)
-        # @aside pregrouped(_.xy => first, _.xy => last)  * visual(Lines) * pregrouped(layout = _.run_id => nonnumeric) |> draw(figure = (;size = (1000, 1000)), axis = (;aspect = DataAspect())) |> save("before.png")
-        @rtransform! :jump = glue_intervention!(:xy, :t, :intervention)
+        @subset(:dance_by .≠ "disrupt"; view = true)
+        @transform! :jump = glue_intervention!.(:xy, :intervention)
     end
     # @aside @chain _ begin 
     #     @subset(:light .== "remain"; view = true)
     #     @rtransform! :poi = impute_poi_time(:t, :xy)
     # end
-    @rtransform! :spontaneous_end = passmissing(tosecond)(:spontaneous_end)
-    @rtransform! :poi = coalesce(:spontaneous_end, :intervention)
+    @transform! :spontaneous_end = passmissing(tosecond).(:spontaneous_end)
+    @transform! :poi = coalesce.(:spontaneous_end, :intervention)
     disallowmissing!(:poi)
-    @rtransform! :poi_index = something(findfirst(≥(:poi), :t), length(:t))
-    @rtransform! $AsTable = remove_loops!(:t, :xy)
-    @rtransform! $AsTable = sparseify(:t, :xy, :poi)
-    @rtransform! $AsTable = smooth(:t, :xy)
-    @rtransform! :dance_spontaneous = !ismissing(:spontaneous_end)
-    @rtransform! :condition = combine_factors(:light, :dance_induced, :at_run)
-    @rtransform! :rot = get_rotation(:xys[:poi_index])
-    @rtransform! $AsTable = get_turn_profile(:t, :spl, :poi)
-    @rtransform! $AsTable = fit_logistic(:lθ, :θ)
-    transform!(:ks => ByRow(identity) => [:L, :k, :x₀, :y₀])
-    @rtransform! :θs = logistic.(:lθ, :L, :k, :x₀, :y₀)
-    @rtransform! :y2025 = Year(:start_datetime) == 2025 ? "2025" : "earlier"
+    @select! Not(:intervention)
+    @transform! :xy = remove_loops.(:xy)
+    @transform! :xy = sparseify.(:xy)
+    @transform! :smooth = smooth.(:xy)
+    @transform! :centered2start = center2start.(:smooth)
+    @transform! :cropped = cropto.(:centered2start, l)
+    @transform! :rotated2poi = rotate2poi.(:cropped, :poi)
+    @transform! :centered2poi_and_cropped = center2poi_and_crop.(:rotated2poi, :poi)
+    # transform!([:pixels, :xy, :smooth, :centered2start, :cropped, :rotated2poi, :centered2poi_and_cropped] .=> ByRow(parent), renamecols = false)
+
+    # @rtransform! $AsTable = fit_logistic(:lθ, :θ)
+    # transform!(:ks => ByRow(identity) => [:L, :k, :x₀, :y₀])
+    # @rtransform! :θs = logistic.(:lθ, :L, :k, :x₀, :y₀)
 end
+
+sdjfhksdjhflasfhj
 
 ############ plot the tyracks to check validity
 CairoMakie.activate!()
