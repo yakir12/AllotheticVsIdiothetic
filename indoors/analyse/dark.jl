@@ -81,7 +81,7 @@ end
 ############ plot the tracks to check validity
 
 fig = (pregrouped(runs.smooth => first => "X (cm)", runs.smooth => last => "Y (cm)", layout = runs.run_id => nonnumeric) * visual(Lines; color = :red) + pregrouped(runs.xy => first => "X (cm)", runs.xy => last => "Y (cm)", layout = runs.run_id => nonnumeric) * visual(Lines)) |> draw(; axis = (; width = 400, height = 400, limits = ((-l, l), (-l, l))));
-save(joinpath(output, "overview.png"), fig)
+save(joinpath(output, "overview_dark.png"), fig)
 
 ################################################### 10 random tracks
 

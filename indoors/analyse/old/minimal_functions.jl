@@ -195,8 +195,6 @@ norm_logistic(y, L, k, y₀) = sign(k)*((y + y₀) / L - 0.5) + 0.5
 #     abs(y) > π && (y -= 2π * sign(y))
 #     return y
 # end
-wrap2pi(x::typeof(π)) = rem2pi(float(x), RoundNearest)
-wrap2pi(x) = rem2pi(x, RoundNearest)
 #######################
 
 

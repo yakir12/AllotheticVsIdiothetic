@@ -69,7 +69,8 @@ end
 function smooth(xy)
     t = lookup(xy, Ti)
     spl = ParametricSpline(t, stack(xy), k = 3, s = 25)
-    DimVector(SV.(spl.(t)), Ti(t))
+    tl = range(first(t), last(t), 100length(t))
+    DimVector(SV.(spl.(tl)), Ti(tl))
 end
 
 function center2start(xy)
