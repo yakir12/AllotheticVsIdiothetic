@@ -107,7 +107,7 @@ for ax in fig.figure.content
     end
 end
 
-save(joinpath(output, "figure1.png"), fig)
+save(joinpath(output, "figure1a.png"), fig)
 
 fig = pregrouped(df.rotated2poi => first => "X (cm)", df.rotated2poi => last => "Y (cm)", col = df.dance_by) * visual(Lines) |> draw(; axis = (; width = 400, height = 400))
 for ax in fig.figure.content 
@@ -118,7 +118,19 @@ for ax in fig.figure.content
     end
 end
 
-save(joinpath(output, "figure1a.png"), fig)
+save(joinpath(output, "figure1b.png"), fig)
+
+df2 = stack(select(df, [:cropped, :dance_by, :rotated2poi]), [:cropped, :rotated2poi])
+fig = pregrouped(df2.value => first => "X (cm)", df2.value => last => "Y (cm)", col = df2.dance_by, row = df2.variable => renamer("cropped" => "unrotated", "rotated2poi" => "rotated")) * visual(Lines) |> draw(; axis = (; width = 400, height = 400))
+for ax in fig.figure.content 
+    if ax isa Axis
+        for r  in (30, 50)
+            lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
+        end
+    end
+end
+
+save(joinpath(output, "figure1c.png"), fig)
 
 ################################################### raw data for turning angles
 
@@ -134,6 +146,10 @@ end
 fig = data(df) * mapping(:Δl => "Distance from POI (path length cm)", :absk => "k", :u, :v, col = :dance_by, row = :at_run => nonnumeric, color = :Δθ => rad2deg => "Total turn") * visual(Arrows) |> draw(scales(Color = (; colormap = :cyclic_wrwbw_40_90_c42_n256_s25, colorrange = (-180, 180))); axis = (; width = 400, height = 400), colorbar = (; ticks = -180:90:180, tickformat = "{:n}°"))
 
 save(joinpath(output, "figure5.png"), fig)
+
+df2 = select(df, [:at_run, :dance_by, :L])
+@transform! df2 :L = round.(Int, rad2deg.(:L .+ π/2))
+CSV.write("L.csv", df2)
 
 # # PCA
 @chain df begin

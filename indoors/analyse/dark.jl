@@ -105,15 +105,15 @@ end
 
 save(joinpath(output, "figure1.png"), fig)
 
-fig = pregrouped(df.rotated2poi => first => "X (cm)", df.rotated2poi => last => "Y (cm)", col = df.dance_by, color = df.y2025) * visual(Lines) |> draw(; axis = (; width = 400, height = 400))
-for ax in fig.figure.content 
-    if ax isa Axis
-        for r  in (30, 50)
-            lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
-        end
-    end
-end
-save(joinpath(output, "figure1a.png"), fig)
+# fig = pregrouped(df.rotated2poi => first => "X (cm)", df.rotated2poi => last => "Y (cm)", col = df.dance_by, color = df.y2025) * visual(Lines) |> draw(; axis = (; width = 400, height = 400))
+# for ax in fig.figure.content 
+#     if ax isa Axis
+#         for r  in (30, 50)
+#             lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
+#         end
+#     end
+# end
+# save(joinpath(output, "figure1a.png"), fig)
 
 
 ######################## Figure 2
@@ -133,7 +133,7 @@ save(joinpath(output, "figure2.png"), fig)
 
 
 df = @subset runs :at_run .== 1
-# @rtransform! df :condition = :light == "remain" ? "remain" : :dance_by
+# df = deepcopy(runs)
 nr = 3
 l1 = floor(Int, minimum(norm ∘ last, df.centered2poi_and_cropped))
 rl = range(1e-3, l1, nr)
@@ -147,9 +147,7 @@ levels!(df.dance_by, ["no", "hold", "disrupt"])
 # R = 60
 # fig = pregrouped(df.centered2poi_and_cropped => first => "X (cm)", df.centered2poi_and_cropped => last => "Y (cm)", col = df.light => renamer("remain" => "Lights on", "dark" => "Lights off"), row = df.dance_by => renamer("no" => "Nothing", "hold" => "Holding ball", "disrupt" => "Removing from ball")) * visual(Lines) |> draw(; axis=(width = 300, height = 300, limits = ((-R, R), (-R, R))))
 
-# , width = 300, height = 300
-
-save(joinpath(output, "figure2a.png"), fig)
+# save(joinpath(output, "figure2a.png"), fig)
 
 light_rename = Dict("remain" => "Lights on", "dark" => "Lights off")
 dance_by_rename = Dict("no" => "Nothing", "hold" => "Holding ball", "disrupt" => "Removing from ball")
@@ -174,16 +172,136 @@ resize_to_layout!(fig)
 
 save(joinpath(output, "figure2b.png"), fig)
 
+##################################
 
-select!(df, Not(:centered2poi_and_cropped))
+df = deepcopy(runs)
+nr = 3
+l1 = floor(Int, minimum(norm ∘ last, df.centered2poi_and_cropped))
+rl = range(1e-3, l1, nr)
+transform!(df, :centered2poi_and_cropped => ByRow(xy -> get_exit_angle.(Ref(xy), rl)) => :θs)
+select!(df, Cols(:light, :dance_by, :at_run, :θs, :centered2poi_and_cropped))
+df.light = categorical(df.light)
+levels!(df.light, ["remain", "dark"])
+df.dance_by = categorical(df.dance_by)
+levels!(df.dance_by, ["no", "hold", "disrupt"])
+@transform! df :grp = string.(:light, :dance_by, :at_run)
+df.grp = categorical(df.grp)
+levels!(df.grp, [
+ "remainno1",
+ "darkno1",
+ "darkno10",
+ "darkhold1",
+ "darkdisrupt1"
+])
+
+fig = Figure()
+for (i, label) in enumerate(["Light", "Manipulation", "At run"])
+     Label(fig[i,0], label)
+end
+for (j, (k, g)) in enumerate(pairs(groupby(df, :grp)))
+    for (i, col) in enumerate([:light, :dance_by, :at_run])
+        Label(fig[i, j], string(g[1,col]))
+    end
+    ax = PolarAxis(fig[4, j], rlimits = (0, 44), width = 300, height = 300)
+    for xy in g.centered2poi_and_cropped
+        θ = splat(atan).(xy) .+ π/2
+        r = norm.(xy)
+        lines!(ax, θ, r, color = :black)
+    end
+end
+resize_to_layout!(fig)
+
+save(joinpath(output, "figure2c.png"), fig)
+
+select!(df, Not(:centered2poi_and_cropped, :grp))
 # select!(df, Cols(:condition, :θs))
 df.r .= Ref(rl)
 
 
 
+lightdf = @chain df begin
+    @subset :dance_by .== "no" :at_run .== 1
+    @select Not(:dance_by, :at_run)
+end
+fm = @formula(mean_resultant_vector ~ light + r)
+newlight = combine(groupby(lightdf, :light), :r => first ∘ first => :r)
+nr2 = 100
+rl2 = range(extrema(rl)..., nr2)
+newlight.r .= Ref(rl2)
+newlight = flatten(newlight, :r)
+newlight.mean_resultant_vector .= 0.0
+pc, c = bootstrap(lightdf, fm, newlight, :light, ["remain", "dark"])
+select!(pc, Not(Symbol("(Precision)")))
+
+y = quantile.(skipmissing.(eachrow(c)), Ref([0.025, 0.5, 0.975]))
+newlight.lower .= getindex.(y, 1)
+newlight.mean_resultant_vector .= getindex.(y, 2)
+newlight.upper .= getindex.(y, 3)
+pvalues = combine(pc, DataFrames.All() .=> stats, renamecols = false)
+pvalues.what = ["proportion", "Q2.5", "median", "Q97.5", "mode", "mean"]
+df2 = stack(pvalues, Not(:what), variable_name = :source)
+pvalues = combine(groupby(df2, :source), [:what, :value] => ((what, value) -> (; Pair.(Symbol.(what), value)...)) => ["proportion", "Q2.5", "median", "Q97.5", "mode", "mean"])
+
+fig = data(newlight) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, color = :light => renamer("remain" => "Lights on", "dark" => "Lights off")) * visual(LinesFill) |> draw(; axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = ((0, l1), (0, 1))))
+
+save(joinpath(output, "figure3a.png"), fig)
+
+atrun = @chain df begin
+    @subset :dance_by .== "no" :light .== "dark"
+    @select Not(:dance_by, :light)
+end
+fm = @formula(mean_resultant_vector ~ at_run + r)
+newrun = combine(groupby(atrun, :at_run), :r => first ∘ first => :r)
+nr2 = 100
+rl2 = range(extrema(rl)..., nr2)
+newrun.r .= Ref(rl2)
+newrun = flatten(newrun, :r)
+newrun.mean_resultant_vector .= 0.0
+pc, c = bootstrap(atrun, fm, newrun, :at_run, [1, 10])
+select!(pc, Not(Symbol("(Precision)")))
+
+y = quantile.(skipmissing.(eachrow(c)), Ref([0.025, 0.5, 0.975]))
+newrun.lower .= getindex.(y, 1)
+newrun.mean_resultant_vector .= getindex.(y, 2)
+newrun.upper .= getindex.(y, 3)
+pvalues = combine(pc, DataFrames.All() .=> stats, renamecols = false)
+pvalues.what = ["proportion", "Q2.5", "median", "Q97.5", "mode", "mean"]
+df2 = stack(pvalues, Not(:what), variable_name = :source)
+pvalues = combine(groupby(df2, :source), [:what, :value] => ((what, value) -> (; Pair.(Symbol.(what), value)...)) => ["proportion", "Q2.5", "median", "Q97.5", "mode", "mean"])
+
+fig = data(newrun) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, color = :at_run => nonnumeric => "At run #") * visual(LinesFill) |> draw(; axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = ((0, l1), (0, 1))))
+
+save(joinpath(output, "figure3b.png"), fig)
+
+dance = @chain df begin
+    @subset :at_run .== 1 :light .== "dark"
+    @select Not(:at_run, :light)
+end
+fm = @formula(mean_resultant_vector ~ dance_by + r)
+newdance = combine(groupby(dance, :dance_by), :r => first ∘ first => :r)
+nr2 = 100
+rl2 = range(extrema(rl)..., nr2)
+newdance.r .= Ref(rl2)
+newdance = flatten(newdance, :r)
+newdance.mean_resultant_vector .= 0.0
+pc, c = bootstrap(dance, fm, newdance, :dance_by, ["no", "hold", "disrupt"])
+select!(pc, Not(Symbol("(Precision)")))
+
+y = quantile.(skipmissing.(eachrow(c)), Ref([0.025, 0.5, 0.975]))
+newdance.lower .= getindex.(y, 1)
+newdance.mean_resultant_vector .= getindex.(y, 2)
+newdance.upper .= getindex.(y, 3)
+pvalues = combine(pc, DataFrames.All() .=> stats, renamecols = false)
+pvalues.what = ["proportion", "Q2.5", "median", "Q97.5", "mode", "mean"]
+df2 = stack(pvalues, Not(:what), variable_name = :source)
+pvalues = combine(groupby(df2, :source), [:what, :value] => ((what, value) -> (; Pair.(Symbol.(what), value)...)) => ["proportion", "Q2.5", "median", "Q97.5", "mode", "mean"])
+
+fig = data(newdance) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, color = :dance_by => renamer("no" => "Nothing", "hold" => "Holding ball", "disrupt" => "Removing from ball") => "Dance induced by") * visual(LinesFill) |> draw(; axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = ((0, l1), (0, 1))))
+
+save(joinpath(output, "figure3c.png"), fig)
 
 
-
+sdjfghsdjkfhlsfhj
 # df.condition = categorical(df.condition)
 # levels!(df.condition, ["remain", "no", "hold", "disrupt"])
 
@@ -198,14 +316,14 @@ df.r .= Ref(rl)
 #     end
 # end
 
-newdf = combine(groupby(df, [:light, :dance_by]), :r => first ∘ first => :r)
+newdf = combine(groupby(df, [:light, :dance_by, :at_run]), :r => first ∘ first => :r)
 nr2 = 100
 rl2 = range(extrema(rl)..., nr2)
 newdf.r .= Ref(rl2)
 newdf = flatten(newdf, :r)
 newdf.mean_resultant_vector .= 0.0
 
-fm = @formula(mean_resultant_vector ~ light + r + dance_by)
+fm = @formula(mean_resultant_vector ~ light + r + dance_by + at_run)
 
 # conditions = levels(df.condition)
 # nr2 = 100
