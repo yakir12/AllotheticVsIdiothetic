@@ -180,10 +180,10 @@ l1 = floor(Int, minimum(norm ∘ last, df.centered2poi_and_cropped))
 rl = range(1e-3, l1, nr)
 transform!(df, :centered2poi_and_cropped => ByRow(xy -> get_exit_angle.(Ref(xy), rl)) => :θs)
 select!(df, Cols(:light, :dance_by, :at_run, :θs, :centered2poi_and_cropped))
-df.light = categorical(df.light)
-levels!(df.light, ["remain", "dark"])
-df.dance_by = categorical(df.dance_by)
-levels!(df.dance_by, ["no", "hold", "disrupt"])
+# df.light = categorical(df.light)
+# levels!(df.light, ["remain", "dark"])
+# df.dance_by = categorical(df.dance_by)
+# levels!(df.dance_by, ["no", "hold", "disrupt"])
 @transform! df :grp = string.(:light, :dance_by, :at_run)
 df.grp = categorical(df.grp)
 levels!(df.grp, [
@@ -300,8 +300,31 @@ fig = data(newdance) * mapping(:r, :mean_resultant_vector, lower = :lower, upper
 
 save(joinpath(output, "figure3c.png"), fig)
 
+newlight.at_run .= 1
+newlight.dance_by .= Ref("no")
+newlight.test .= Ref("light")
+newrun.light .= Ref("dark")
+newrun.dance_by .= Ref("no")
+newrun.test .= Ref("run")
+newdance.light .= Ref("dark")
+newdance.at_run .= 1
+newdance.test .= Ref("dance")
+
+df = vcat(newlight, newrun, newdance)
+@transform! df :grp = string.(:light, " ", :at_run, " ", :dance_by)
+
+# fig = data(df) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, col = :test, color = :grp) * visual(LinesFill; linestyle = :at_run) |> draw(; axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = ((0, l1), (0, 1))))
+
+spec = data(df) * mapping(:r, :mean_resultant_vector, col = :test, color = :grp, linestyle = :at_run => nonnumeric, linewidth = :light) * visual(Lines) 
+draw(spec, scales(LineWidth = (; sizerange = (2, 10),)), axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = ((0, l1), (0, 1))))
 
 sdjfghsdjkfhlsfhj
+
+df = DataFrame(y = rand(10), x = repeat(["c", "b"], 5))
+fm = @formula(y ~ x)
+m = BetaRegression.fit(BetaRegressionModel, fm, df)
+
+
 # df.condition = categorical(df.condition)
 # levels!(df.condition, ["remain", "no", "hold", "disrupt"])
 

@@ -4,10 +4,15 @@ function mean_resultant_vector(θ)
     norm(mean(SV ∘ sincos, θ))
 end
 
-function _bootstrap(df, fm, factor, levels)
+function _bootstrap(df, fm, factor, levels, newdf)
+
+    # df = lightdf
+    # newdf = newlight
+
     n = nrow(df)
     df2 = flatten(df[sample(1:n, n), :], [:θs, :r])
     df3 = combine(groupby(df2, [factor, :r]), :θs => mean_resultant_vector => :mean_resultant_vector)
+
     # df3[:, factor] = categorical(df3[:, factor])
     # levels!(df3[:, factor], levels)
     sort!(df3, factor)
@@ -15,19 +20,21 @@ function _bootstrap(df, fm, factor, levels)
     # levels!(df3.dance_by, ["no", "hold", "disrupt"])
     try
         m = BetaRegression.fit(BetaRegressionModel, fm, df3)
+        # @show df3
         tbl = coeftable(m)
         row = (; Pair.(Symbol.(tbl.rownms), tbl.cols[tbl.pvalcol])...)
         # row = tbl.cols[tbl.pvalcol]
         (row,  predict(m, newdf))
     catch ex
+        # @show df3, fm, newdf, ex
         missing
     end
 end
 
-function __bootstrap(df, fm, factor, levels)
+function __bootstrap(df, fm, factor, levels, newdf)
     n = 100
     for i in 1:n
-        rowy = _bootstrap(df, fm, factor, levels)
+        rowy = _bootstrap(df, fm, factor, levels, newdf)
         if !ismissing(rowy)
             return rowy
         end
@@ -54,16 +61,17 @@ end
 # end
 function bootstrap(df, fm, newdf, factor, levels)
     n = 10_000
-    row, y = __bootstrap(df, fm, factor, levels)
+    row, y = __bootstrap(df, fm, factor, levels, newdf)
     v1 = (; pairs(row)...)
     rows = Vector{typeof(v1)}(undef, n)
     # rows = DataFrame(Dict(pairs(row)))
     # empty!(rows)
     ys = Matrix{Float64}(undef, nrow(newdf), n)
     i = 0
-    Threads.@threads for i in 1:n
+    # Threads.@threads 
+    for i in 1:n
     # while i < n
-        rowy = _bootstrap(df, fm, factor, levels)
+        rowy = _bootstrap(df, fm, factor, levels, newdf)
         if ismissing(rowy)
             continue
         else
