@@ -1,21 +1,32 @@
+function path_length_at(xy, l1)
+    p1 = xy[1]
+    s = 0.0
+    for p2 in xy[2:end]
+        s += norm(p2 - p1)
+        norm(p1) ≥ l1 && return s
+        p1 = p2
+    end
+    return s
+end
+
 critical_r(n, p = 0.05) = sqrt(-4n * log(p) + 4n - log(p)^2 + 1)/(2n)
 
 function mean_resultant_vector(θ)
     norm(mean(SV ∘ sincos, θ))
 end
 
-function _bootstrap(df, fm, factor, levels, newdf)
+function _bootstrap(df, fm, factors, newdf)
 
     # df = lightdf
     # newdf = newlight
 
     n = nrow(df)
     df2 = flatten(df[sample(1:n, n), :], [:θs, :r])
-    df3 = combine(groupby(df2, [factor, :r]), :θs => mean_resultant_vector => :mean_resultant_vector)
+    df3 = combine(groupby(df2, [factors..., :r]), :θs => mean_resultant_vector => :mean_resultant_vector)
 
     # df3[:, factor] = categorical(df3[:, factor])
     # levels!(df3[:, factor], levels)
-    sort!(df3, factor)
+    sort!(df3, factors)
     # df3.dance_by = categorical(df3.dance_by)
     # levels!(df3.dance_by, ["no", "hold", "disrupt"])
     try
@@ -31,10 +42,10 @@ function _bootstrap(df, fm, factor, levels, newdf)
     end
 end
 
-function __bootstrap(df, fm, factor, levels, newdf)
+function __bootstrap(df, fm, factors, newdf)
     n = 100
     for i in 1:n
-        rowy = _bootstrap(df, fm, factor, levels, newdf)
+        rowy = _bootstrap(df, fm, factors, newdf)
         if !ismissing(rowy)
             return rowy
         end
@@ -59,9 +70,9 @@ end
 #         missing
 #     end
 # end
-function bootstrap(df, fm, newdf, factor, levels)
+function bootstrap(df, fm, newdf, factors)
     n = 10_000
-    row, y = __bootstrap(df, fm, factor, levels, newdf)
+    row, y = __bootstrap(df, fm, factors, newdf)
     v1 = (; pairs(row)...)
     rows = Vector{typeof(v1)}(undef, n)
     # rows = DataFrame(Dict(pairs(row)))
@@ -70,8 +81,8 @@ function bootstrap(df, fm, newdf, factor, levels)
     i = 0
     # Threads.@threads 
     for i in 1:n
-    # while i < n
-        rowy = _bootstrap(df, fm, factor, levels, newdf)
+        # while i < n
+        rowy = _bootstrap(df, fm, factors, newdf)
         if ismissing(rowy)
             continue
         else
