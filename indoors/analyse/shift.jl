@@ -38,13 +38,34 @@ runs = @chain joinpath(results_dir, "runs.csv") begin
     CSV.read(DataFrame)
     @select Not(:runs_path, :start_location, :fps, :target_width, :runs_file, :window_size)
     @subset :light .== "shift"
+    @transform :tij_file = joinpath.(results_dir, :tij_file)
+    @transform :location = "Lund"
 end
 calibs = @chain joinpath(results_dir, "calibs.csv") begin
     CSV.read(DataFrame)
-    @transform :rectify = get_calibration.(:calibration_id)
+    @transform :calibration_file = joinpath.(results_dir, :calibration_id)
+    @transform :rectify = get_calibration.(:calibration_file)
     @select Cols(:calibration_id, :rectify)
 end
 leftjoin!(runs, calibs, on = :calibration_id)
+
+results_dir50 = "../../outdoors50/track_calibrate/tracks and calibrations"
+runs50 = @chain joinpath(results_dir50, "runs.csv") begin
+    CSV.read(DataFrame)
+    @select Not(:runs_path, :start_location, :fps, :target_width, :runs_file, :window_size)
+    @subset :light .== "shift"
+    @transform :tij_file = joinpath.(results_dir50, :tij_file)
+end
+calibs50 = @chain joinpath(results_dir50, "calibs.csv") begin
+    CSV.read(DataFrame)
+    @transform :calibration_file = joinpath.(results_dir50, :calibration_id)
+    @transform :rectify = get_calibration.(:calibration_file)
+    @select Cols(:calibration_id, :rectify)
+end
+leftjoin!(runs50, calibs50, on = :calibration_id)
+
+runs = vcat(runs, runs50, cols = :union)
+
 @chain runs begin
     @select! Not(:calibration_id)
     @transform! :dance_spontaneous = .!ismissing.(:spontaneous_end)
@@ -143,7 +164,13 @@ df = @chain runs begin
     @transform :absk = abs.(:k)
 end
 
-fig = data(df) * mapping(:Δl => "Distance from POI (path length cm)", :absk => "k", :u, :v, col = :dance_by, row = :at_run => nonnumeric, color = :Δθ => rad2deg => "Total turn") * visual(Arrows) |> draw(scales(Color = (; colormap = :cyclic_wrwbw_40_90_c42_n256_s25, colorrange = (-180, 180))); axis = (; width = 400, height = 400), colorbar = (; ticks = -180:90:180, tickformat = "{:n}°"))
+# fig = data(df) * mapping(:Δl => "Distance from POI (path length cm)", :absk => "k", :u, :v, col = :dance_by, row = :at_run => nonnumeric, color = :Δθ => rad2deg => "Total turn") * visual(Arrows) |> draw(scales(Color = (; colormap = :cyclic_wrwbw_40_90_c42_n256_s25, colorrange = (-180, 180))); axis = (; width = 200, height = 200), colorbar = (; ticks = -180:90:180, tickformat = "{:n}°"))
+
+
+heads = ['▲', '□']
+plt = data(df) * mapping(:Δl => "Distance from POI (path length cm)", :absk => "k", :u, :v, col = :dance_by, row = :at_run => nonnumeric, arrowhead = :location, color = :Δθ => rad2deg => "Total turn") * visual(Arrows, arrowsize=10, lengthscale=1, linewidth = 1) 
+fig = draw(plt, scales(Color = (; colormap = :cyclic_wrwbw_40_90_c42_n256_s25, colorrange = (-180, 180)), Marker = (; palette = heads)); axis = (; width = 200, height = 200))
+
 
 save(joinpath(output, "figure5.png"), fig)
 
@@ -162,6 +189,23 @@ end
 # M = MultivariateStats.fit(PCA, Xtr; maxoutdim=3)
 # data((; at_run = df.at_run, dance_by = df.dance_by, pc1 = first(eachcol(M.proj)), pc2 = last(eachcol(M.proj)))) * mapping(:pc1, :pc2, col = :dance_by, row = :at_run => nonnumeric) * visual(Scatter) |> draw()
 
+# test to see if location has any effect
+
+df2 = @chain df begin
+    @subset :at_run .== 1
+    # @rtransform :dance_by = :dance_by == "no" ? "no" : "yes"
+end
+
+heads = ['▲', '□']
+plt = data(df2) * mapping(:Δl => "Distance from POI (path length cm)", :absk => "k", :u, :v, col = :dance_by, row = :at_run => nonnumeric, arrowhead = :location, color = :Δθ => rad2deg => "Total turn") * visual(Arrows, arrowsize=10, lengthscale=1, linewidth = 1) 
+fig = draw(plt, scales(Color = (; colormap = :cyclic_wrwbw_40_90_c42_n256_s25, colorrange = (-180, 180)), Marker = (; palette = heads)); axis = (; width = 200, height = 200))
+
+
+fig = data(df2) * mapping(:location, :absk => "k", col = :dance_by) * visual(RainClouds, violin_limits = extrema) |> draw(; axis = (; width = 200, height = 200)) 
+save(joinpath(output, "figure7.png"), fig)
+
+
+m = glm(@formula(kabs ~ location*dance_by), df2, Gamma())
 
 
 # correlation tests
@@ -172,7 +216,10 @@ cor(df.kabs, df.Δθnormalized)
 m = glm(@formula(kabs ~ dance_by*at_run), df, Gamma())
 m = glm(@formula(kabs ~ dance_by + at_run), df, Gamma())
 
-m = glm(@formula(kabs ~ dance_by), df, Gamma())
+@rtransform! df :dance_by = :dance_by == "no" ? "no" : "yes"
+m = glm(@formula(kabs ~ location*dance_by), df, Gamma())
+
+m = glm(@formula(kabs ~ location+dance_by), @subset(df, :at_run .== 1), Gamma())
 
 # predictions = DataFrame(dance_by = [true, false])
 # predictions = hcat(predictions, rename(predict(m, predictions; interval = :confidence), :prediction => :k, :lower => :lower_k, :upper => :upper_k))
@@ -196,7 +243,7 @@ m = BetaRegression.fit(BetaRegressionModel, @formula(Δθnormalized ~ dance_by),
     @rtransform! :θnormalized = parent(:θ.θ .- :θ.θ[Ti = Near(:poi)])#:k < 0 ? :θ .+ :y₀ .- π : :θ .+ :y₀
 end
 
-fig = pregrouped(df.lθshifted => "Distance from POI (path length cm)", df.θnormalized => rad2deg) * visual(Lines) * mapping(col = df.dance_by, row = df.at_run => nonnumeric, color = df.y2025) |> draw()#; axis = (; width = 400, height = 400, ytickformat = "{:n}°", yticks = -180:90:270, limits = ((-5, 5), nothing)))
+fig = pregrouped(df.lθshifted => "Distance from POI (path length cm)", df.θnormalized => rad2deg) * visual(Lines) * mapping(color = df.location, col = df.dance_by, row = df.at_run => nonnumeric) |> draw()#; axis = (; width = 400, height = 400, ytickformat = "{:n}°", yticks = -180:90:270, limits = ((-5, 5), nothing)))
 
 save(joinpath(output, "figure6.png"), fig)
 

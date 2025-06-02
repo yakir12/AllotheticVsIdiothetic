@@ -62,7 +62,7 @@ function remove_stops(ij)
 end
 
 function get_tij(file)
-    tij = CSV.File(joinpath(results_dir, file))
+    tij = CSV.File(file)
     t = range(tij.t[1], tij.t[end], length = length(tij))
     pixels = DimVector(CameraCalibrations.RowCol.(tij.i, tij.j), Ti(t))
 end
@@ -130,8 +130,8 @@ end
 #     return ys
 # end
 
-function get_calibration(calibration_id)
-    c = CameraCalibrations.load(joinpath(results_dir, calibration_id))
+function get_calibration(file)
+    c = CameraCalibrations.load(file)
     f = rectification(c)
     # fun(ij)::Function = f.(ij)
     return f

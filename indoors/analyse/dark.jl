@@ -38,11 +38,13 @@ runs = @chain joinpath(results_dir, "runs.csv") begin
     CSV.read(DataFrame)
     @select Not(:runs_path, :start_location, :fps, :target_width, :runs_file, :window_size)
     @subset :light .≠ "shift"
-
+    @transform :tij_file = joinpath.(results_dir, :tij_file)
+    @transform :location = "Lund"
 end
 calibs = @chain joinpath(results_dir, "calibs.csv") begin
     CSV.read(DataFrame)
-    @transform :rectify = get_calibration.(:calibration_id)
+    @transform :calibration_file = joinpath.(results_dir, :calibration_id)
+    @transform :rectify = get_calibration.(:calibration_file)
     @select Cols(:calibration_id, :rectify)
 end
 leftjoin!(runs, calibs, on = :calibration_id)
@@ -245,6 +247,14 @@ pvalues = combine(groupby(df2, :source), [:what, :value] => ((what, value) -> (;
 show(pvalues, show_row_number=false, eltypes=false)
 
 fig = data(newlight) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, color = :light => renamer("remain" => "Lights on", "dark" => "Lights off")) * visual(LinesFill) |> draw(; axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = ((0, l1), (0, 1))))
+
+df2 = combine(groupby(newlight, :light), nrow)
+@transform! df2 :r̄ = critical_r.(:nrow)
+
+fig = (data(newlight) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, color = :light => renamer("remain" => "Lights on", "dark" => "Lights off")) * visual(LinesFill) + data(df2) * mapping(:r̄, color = :light) * visual(HLines)) |> draw(; axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = ((0, l1), (0, 1))))
+
+
+sdkfjhjsdkf
 
 save(joinpath(output, "figure3a.png"), fig)
 
