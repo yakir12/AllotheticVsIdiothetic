@@ -138,7 +138,8 @@ df = @subset runs :at_run .== 1
 # df = deepcopy(runs)
 nr = 3
 l1 = floor(Int, minimum(norm ∘ last, df.centered2poi_and_cropped))
-rl = range(1e-3, l1, nr)
+change minimum to 5!!!!
+rl = range(5, l1, nr)
 transform!(df, :centered2poi_and_cropped => ByRow(xy -> get_exit_angle.(Ref(xy), rl)) => :θs)
 select!(df, Cols(:light, :dance_by, :θs, :centered2poi_and_cropped))
 df.light = categorical(df.light)
@@ -248,15 +249,14 @@ show(pvalues, show_row_number=false, eltypes=false)
 
 fig = data(newlight) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, color = :light => renamer("remain" => "Lights on", "dark" => "Lights off")) * visual(LinesFill) |> draw(; axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = ((0, l1), (0, 1))))
 
+save(joinpath(output, "figure3a.png"), fig)
+
 df2 = combine(groupby(newlight, :light), nrow)
 @transform! df2 :r̄ = critical_r.(:nrow)
 
-fig = (data(newlight) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, color = :light => renamer("remain" => "Lights on", "dark" => "Lights off")) * visual(LinesFill) + data(df2) * mapping(:r̄, color = :light) * visual(HLines)) |> draw(; axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = ((0, l1), (0, 1))))
+fig = (data(newlight) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, color = :light => renamer("remain" => "Lights on", "dark" => "Lights off")) * visual(LinesFill) + data(df2) * mapping(:r̄) * visual(HLines)) |> draw(; axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = ((0, l1), (0, 1))))
 
-
-sdkfjhjsdkf
-
-save(joinpath(output, "figure3a.png"), fig)
+save(joinpath(output, "figure3a1.png"), fig)
 
 atrun = @chain df begin
     @subset :dance_by .== "no" :light .== "dark"
@@ -287,6 +287,14 @@ fig = data(newrun) * mapping(:r, :mean_resultant_vector, lower = :lower, upper =
 
 save(joinpath(output, "figure3b.png"), fig)
 
+df2 = combine(groupby(newrun, :at_run), nrow)
+@transform! df2 :r̄ = critical_r.(:nrow)
+
+fig = (data(newrun) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, color = :at_run => nonnumeric => "At run #") * visual(LinesFill) + data(df2) * mapping(:r̄) * visual(HLines)) |> draw(; axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = ((0, l1), (0, 1))))
+
+save(joinpath(output, "figure3b1.png"), fig)
+
+
 dance = @chain df begin
     @subset :at_run .== 1 :light .== "dark"
     @select Not(:at_run, :light)
@@ -315,6 +323,14 @@ show(pvalues, show_row_number=false, eltypes=false)
 fig = data(newdance) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, color = :dance_by => renamer("no" => "Nothing", "hold" => "Holding ball", "disrupt" => "Removing from ball") => "Dance induced by") * visual(LinesFill) |> draw(; axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = ((0, l1), (0, 1))))
 
 save(joinpath(output, "figure3c.png"), fig)
+
+
+df2 = combine(groupby(newdance, :dance_by), nrow)
+@transform! df2 :r̄ = critical_r.(:nrow)
+
+fig = (data(newdance) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, color = :dance_by => renamer("no" => "Nothing", "hold" => "Holding ball", "disrupt" => "Removing from ball") => "Dance induced by") * visual(LinesFill) + data(df2) * mapping(:r̄) * visual(HLines)) |> draw(; axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = ((0, l1), (0, 1))))
+
+save(joinpath(output, "figure3c1.png"), fig)
 
 newlight.at_run .= 1
 newlight.dance_by .= Ref("no")
@@ -369,6 +385,7 @@ stats2plot = combine(groupby(newdf, [:light, :dance_by, :at_run]), [:r, :mean_re
 toplot = leftjoin(tracks2plot, stats2plot, on = [:light, :dance_by, :at_run])
 sort!(toplot, order(:upper, by = first, rev = true))
 
+@transform! toplot :r̄ = critical_r.(length.(:centered2poi_and_cropped))
 
 fig = Figure()
 for (i, label) in enumerate(["Light", "Manipulation", "At run"])
@@ -390,6 +407,7 @@ for (j, row) in enumerate(eachrow(toplot))
     if j ≠ 1
         hideydecorations!(ax, grid = false, minorgrid = false)
     end
+    hlines!(ax, row.r̄, color = :grey)
 end
 Label(fig[6, 1:5], "Radius (cm)")
 resize_to_layout!(fig)
