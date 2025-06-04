@@ -9,7 +9,24 @@ function path_length_at(xy, l1)
     return s
 end
 
-critical_r(n, p = 0.05) = sqrt(-4n * log(p) + 4n - log(p)^2 + 1)/(2n)
+critical_r(n, p = 0.95) = critical_r̄(n, p)
+
+function sample_r̄(n)
+    p = 0.0im
+    for _ in 1:n
+        α = 2π*rand()
+        p += exp(α*im)
+    end
+    return norm(p)/n
+end
+
+function critical_r̄(n, p, nn = 10^7)
+    r̄s = Vector{Float64}(undef, nn)
+    Threads.@threads for i in 1:nn
+        r̄s[i] = sample_r̄(n)
+    end
+    return quantile(r̄s, p)
+end
 
 function mean_resultant_vector(θ)
     norm(mean(SV ∘ sincos, θ))

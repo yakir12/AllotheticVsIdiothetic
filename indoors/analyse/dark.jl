@@ -138,7 +138,6 @@ df = @subset runs :at_run .== 1
 # df = deepcopy(runs)
 nr = 3
 l1 = floor(Int, minimum(norm ∘ last, df.centered2poi_and_cropped))
-change minimum to 5!!!!
 rl = range(5, l1, nr)
 transform!(df, :centered2poi_and_cropped => ByRow(xy -> get_exit_angle.(Ref(xy), rl)) => :θs)
 select!(df, Cols(:light, :dance_by, :θs, :centered2poi_and_cropped))
@@ -180,7 +179,7 @@ save(joinpath(output, "figure2b.png"), fig)
 df = deepcopy(runs)
 nr = 3
 l1 = floor(Int, minimum(norm ∘ last, df.centered2poi_and_cropped))
-rl = range(1e-3, l1, nr)
+rl = range(5, l1, nr)
 transform!(df, :centered2poi_and_cropped => ByRow(xy -> get_exit_angle.(Ref(xy), rl)) => :θs)
 select!(df, Cols(:light, :dance_by, :at_run, :θs, :centered2poi_and_cropped))
 # df.light = categorical(df.light)
@@ -247,14 +246,14 @@ pvalues = combine(groupby(df2, :source), [:what, :value] => ((what, value) -> (;
 
 show(pvalues, show_row_number=false, eltypes=false)
 
-fig = data(newlight) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, color = :light => renamer("remain" => "Lights on", "dark" => "Lights off")) * visual(LinesFill) |> draw(; axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = ((0, l1), (0, 1))))
+fig = data(newlight) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, color = :light => renamer("remain" => "Lights on", "dark" => "Lights off")) * visual(LinesFill) |> draw(; axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = (extrema(rl), (0, 1))))
 
 save(joinpath(output, "figure3a.png"), fig)
 
 df2 = combine(groupby(newlight, :light), nrow)
 @transform! df2 :r̄ = critical_r.(:nrow)
 
-fig = (data(newlight) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, color = :light => renamer("remain" => "Lights on", "dark" => "Lights off")) * visual(LinesFill) + data(df2) * mapping(:r̄) * visual(HLines)) |> draw(; axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = ((0, l1), (0, 1))))
+fig = (data(newlight) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, color = :light => renamer("remain" => "Lights on", "dark" => "Lights off")) * visual(LinesFill) + data(df2) * mapping(:r̄) * visual(HLines)) |> draw(; axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = (extrema(rl), (0, 1))))
 
 save(joinpath(output, "figure3a1.png"), fig)
 
@@ -283,14 +282,14 @@ pvalues = combine(groupby(df2, :source), [:what, :value] => ((what, value) -> (;
 
 show(pvalues, show_row_number=false, eltypes=false)
 
-fig = data(newrun) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, color = :at_run => nonnumeric => "At run #") * visual(LinesFill) |> draw(; axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = ((0, l1), (0, 1))))
+fig = data(newrun) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, color = :at_run => nonnumeric => "At run #") * visual(LinesFill) |> draw(; axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = (extrema(rl), (0, 1))))
 
 save(joinpath(output, "figure3b.png"), fig)
 
 df2 = combine(groupby(newrun, :at_run), nrow)
 @transform! df2 :r̄ = critical_r.(:nrow)
 
-fig = (data(newrun) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, color = :at_run => nonnumeric => "At run #") * visual(LinesFill) + data(df2) * mapping(:r̄) * visual(HLines)) |> draw(; axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = ((0, l1), (0, 1))))
+fig = (data(newrun) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, color = :at_run => nonnumeric => "At run #") * visual(LinesFill) + data(df2) * mapping(:r̄) * visual(HLines)) |> draw(; axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = (extrema(rl), (0, 1))))
 
 save(joinpath(output, "figure3b1.png"), fig)
 
@@ -320,7 +319,7 @@ pvalues = combine(groupby(df2, :source), [:what, :value] => ((what, value) -> (;
 
 show(pvalues, show_row_number=false, eltypes=false)
 
-fig = data(newdance) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, color = :dance_by => renamer("no" => "Nothing", "hold" => "Holding ball", "disrupt" => "Removing from ball") => "Dance induced by") * visual(LinesFill) |> draw(; axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = ((0, l1), (0, 1))))
+fig = data(newdance) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, color = :dance_by => renamer("no" => "Nothing", "hold" => "Holding ball", "disrupt" => "Removing from ball") => "Dance induced by") * visual(LinesFill) |> draw(; axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = (extrema(rl), (0, 1))))
 
 save(joinpath(output, "figure3c.png"), fig)
 
@@ -328,7 +327,7 @@ save(joinpath(output, "figure3c.png"), fig)
 df2 = combine(groupby(newdance, :dance_by), nrow)
 @transform! df2 :r̄ = critical_r.(:nrow)
 
-fig = (data(newdance) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, color = :dance_by => renamer("no" => "Nothing", "hold" => "Holding ball", "disrupt" => "Removing from ball") => "Dance induced by") * visual(LinesFill) + data(df2) * mapping(:r̄) * visual(HLines)) |> draw(; axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = ((0, l1), (0, 1))))
+fig = (data(newdance) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, color = :dance_by => renamer("no" => "Nothing", "hold" => "Holding ball", "disrupt" => "Removing from ball") => "Dance induced by") * visual(LinesFill) + data(df2) * mapping(:r̄) * visual(HLines)) |> draw(; axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = (extrema(rl), (0, 1))))
 
 save(joinpath(output, "figure3c1.png"), fig)
 
@@ -345,7 +344,7 @@ newdance.test .= Ref("manipulation")
 df3 = vcat(newlight, newrun, newdance)
 @transform! df3 :grp = string.(:light, " ", :at_run, " ", :dance_by)
 
-fig = data(df3) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, col = :test, color = :grp) * visual(LinesFill) |> draw(; axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = ((0, l1), (0, 1))))
+fig = data(df3) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, col = :test, color = :grp) * visual(LinesFill) |> draw(; axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = (extrema(rl), (0, 1))))
 
 save(joinpath(output, "figure3d.png"), fig)
 
@@ -375,9 +374,9 @@ show(pvalues, show_row_number=false, eltypes=false)
 
 @transform! newdf :grp = string.(:light, " ", :at_run, " ", :dance_by)
 
-fig = data(newdf) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, col = :grp) * visual(LinesFill) |> draw(; axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = ((0, l1), (0, 1))))
+fig = data(newdf) * mapping(:r, :mean_resultant_vector, lower = :lower, upper = :upper, col = :grp) * visual(LinesFill) |> draw(; axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = (extrema(rl), (0, 1))))
 
-fig = data(newdf) * mapping(:r, :lower, :upper, col = :grp) * visual(Band; alpha = 0.5) |> draw(; axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = ((0, l1), (0, 1))))
+fig = data(newdf) * mapping(:r, :lower, :upper, col = :grp) * visual(Band; alpha = 0.5) |> draw(; axis = (; ylabel = "Mean resultant vector length", xlabel = "Radius (cm)", width = 300, height = 300, limits = (extrema(rl), (0, 1))))
 
 
 tracks2plot = combine(groupby(df, [:light, :dance_by, :at_run]), :centered2poi_and_cropped => Ref => :centered2poi_and_cropped)
@@ -402,7 +401,7 @@ for (j, row) in enumerate(eachrow(toplot))
         r = norm.(xy)
         lines!(ax, θ, r, color = :black)
     end
-    ax = Axis(fig[5, j], limits = ((0, l1), (0, 1)), width = 300, height = 300, ylabel = "Mean resultant vector length")
+    ax = Axis(fig[5, j], limits = (extrema(rl), (0, 1)), width = 300, height = 300, ylabel = "Mean resultant vector length")
     linesfill!(ax, row.r, row.mean_resultant_vector, lower = row.lower, upper = row.upper)
     if j ≠ 1
         hideydecorations!(ax, grid = false, minorgrid = false)

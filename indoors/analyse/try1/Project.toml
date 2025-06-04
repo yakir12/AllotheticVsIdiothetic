@@ -1,0 +1,6 @@
+[deps]
+AlgebraOfGraphics = "cbdf2221-f076-402e-a563-3d30da359d67"
+Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
+GLMakie = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+Turing = "fce5fe82-541a-59a6-adf8-730c64b5f9a0"
