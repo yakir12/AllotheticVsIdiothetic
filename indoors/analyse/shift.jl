@@ -7,16 +7,18 @@ using GeometryBasics
 # using StatsBase, Graphs
 using Dates, LinearAlgebra, Statistics, Random
 using CSV, DataFrames, CameraCalibrations
-using Interpolations, StaticArrays, Dierckx, CoordinateTransformations, Rotations
-using OhMyThreads
+# using Interpolations
+using StaticArrays, Dierckx, CoordinateTransformations, Rotations
+# using OhMyThreads
 using LsqFit
-using Optim
+# using Optim
 using CategoricalArrays
 using Distributions
-using IntervalSets
-using QuadGK
+# using IntervalSets
+# using QuadGK
 using BetaRegression
 using DimensionalData
+import DimensionalData:DimVector
 
 GLMakie.activate!()
 
@@ -246,4 +248,68 @@ end
 fig = pregrouped(df.lθshifted => "Distance from POI (path length cm)", df.θnormalized => rad2deg) * visual(Lines) * mapping(color = df.location, col = df.dance_by, row = df.at_run => nonnumeric) |> draw()#; axis = (; width = 400, height = 400, ytickformat = "{:n}°", yticks = -180:90:270, limits = ((-5, 5), nothing)))
 
 save(joinpath(output, "figure6.png"), fig)
+
+
+###
+
+
+df = @chain runs begin
+    @subset :at_run .== 1
+    @subset :logistic_rsquare .> 0.95
+    @transform :induced = :dance_by .≠ "no"
+    @transform :Δθ = wrap2pi.(:L)
+    transform(:L => ByRow(l -> sincos(l .+ π/2)) => [:v, :u])
+    @rtransform :Δl = (:x₀ .- :θ.l[Ti = Near(:poi)])
+    @transform :absk = abs.(:k)
+    @rtransform :lθshifted = parent(:θ.l .- :θ.l[Ti = Near(:poi)]) # .- :x₀
+    @rtransform :θnormalized = parent(:θ.θ .- :θ.θ[Ti = Near(:poi)])#:k < 0 ? :θ .+ :y₀ .- π : :θ .+ :y₀
+end
+
+# fig = data(df) * mapping(:Δl => "Distance from POI (path length cm)", :absk => "k", :u, :v, col = :dance_by, row = :at_run => nonnumeric, color = :Δθ => rad2deg => "Total turn") * visual(Arrows) |> draw(scales(Color = (; colormap = :cyclic_wrwbw_40_90_c42_n256_s25, colorrange = (-180, 180))); axis = (; width = 200, height = 200), colorbar = (; ticks = -180:90:180, tickformat = "{:n}°"))
+
+
+m = mapping(col = df.induced => renamer(false => "Dance not induced", true => "Dance induced"), color = df.location => renamer("Lund" => "LED", "Bela-Bela" => "Sun") => "Stimulus") 
+tracks = pregrouped(df.rotated2poi => first => "X (cm)", df.rotated2poi => last => "Y (cm)") * visual(Lines) 
+angles = pregrouped(df.lθshifted => "Distance from POI (path length cm)", df.θnormalized => rad2deg => "Accumulated turn (°)") * visual(Lines)
+m3 = mapping(col = :induced => renamer(false => "", true => ""), color = :location => renamer("Lund" => "LED", "Bela-Bela" => "Sun") => "Stimulus") 
+plt = data(df) * mapping(:Δl => "Distance from POI (path length cm)", :absk => "k", :u, :v) * visual(Arrows, arrowsize=10, lengthscale=1, linewidth = 1) 
+
+fig = Figure()
+h = draw!(fig[1,1], m * tracks; axis = (; width = 250, height = 250))
+for ax in fig.content 
+    if ax isa Axis
+        for r  in (30, 50)
+            lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
+        end
+    end
+end
+draw!(fig[2,1], m * angles * mapping(col = df.induced => renamer(false => "", true => "")); axis = (; xticklabelsvisible = false, xticksvisible = false, xlabelvisible = false, xlabel = "", width = 250, height = 250, limits = ((-7, 17), (-200, 200)), yticks = -180:90:180))
+draw!(fig[3,1], m3 * plt; axis = (; width = 250, height = 250, limits = ((-7, 17), nothing)))
+legend!(fig[0, 1], h, orientation = :horizontal, titleposition = :left)
+resize_to_layout!(fig)
+
+
+save(joinpath(output, "figure1.png"), fig)
+
+m = mapping(color = df.induced => renamer(false => "Dance not induced", true => "Dance induced"), col = df.location => renamer("Lund" => "LED", "Bela-Bela" => "Sun") => "Stimulus") 
+tracks = pregrouped(df.rotated2poi => first => "X (cm)", df.rotated2poi => last => "Y (cm)") * visual(Lines) 
+angles = pregrouped(df.lθshifted => "Distance from POI (path length cm)", df.θnormalized => rad2deg => "Accumulated turn (°)") * visual(Lines)
+m3 = mapping(color = :induced, col = :location => renamer("Lund" => "", "Bela-Bela" => "")) 
+plt = data(df) * mapping(:Δl => "Distance from POI (path length cm)", :absk => "k", :u, :v) * visual(Arrows, arrowsize=10, lengthscale=1, linewidth = 1) 
+fig = Figure()
+h = draw!(fig[1,1], m * tracks; axis = (; width = 250, height = 250))
+for ax in fig.content 
+    if ax isa Axis
+        for r  in (30, 50)
+            lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
+        end
+    end
+end
+draw!(fig[2,1], m * angles * mapping(col = df.location => renamer("Lund" => "", "Bela-Bela" => "") => "Stimulus"); axis = (; xticklabelsvisible = false, xticksvisible = false, xlabelvisible = false, xlabel = "", width = 250, height = 250, limits = ((-7, 17), (-200, 200)), yticks = -180:90:180))
+draw!(fig[3,1], m3 * plt; axis = (; width = 250, height = 250, limits = ((-7, 17), nothing)))
+legend!(fig[0, 1], h, orientation = :horizontal, titleposition = :left)
+resize_to_layout!(fig)
+
+
+save(joinpath(output, "figure2.png"), fig)
 
