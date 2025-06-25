@@ -3,6 +3,40 @@ using CSV, DataFrames
 using GLMakie, AlgebraOfGraphics
 using GLM
 
+function angular_range(start, stop, length, cw, fullturns)
+    if start < stop
+        if cw 
+            stop -= (fullturns + 1)*2π #
+        else
+            stop += fullturns*2π #
+        end
+    elseif start > stop
+        if cw 
+            stop += fullturns*2π #
+        else
+            stop += (fullturns + 1)*2π #
+        end
+    else
+        throw(ArgumentError("start and stop can't be equal"))
+    end
+    return range(start, stop, length) 
+end
+
+angular_range(start, stop, cw, fullturns) = angular_range(start, stop, 100, cw, fullturns)
+
+function angular_range(start, stop, lastcw)
+    if start < stop
+        angular_range(start, stop, false, 0)
+    elseif start > stop
+        angular_range(start, stop, true, 0)
+    else
+        if lastcw
+            angular_range(start, stop - 0.01, lastcw, 0)
+        else
+            angular_range(start, stop + 0.01, lastcw, 0)
+        end
+    end
+end
 
 # df = CSV.read("data.csv", DataFrame)
 
@@ -26,15 +60,15 @@ using GLM
 #     end
 # end
 
-norm2init(init, turn) = rem2pi(turn - init, RoundNearest)
+# norm2init(init, turn) = rem2pi(turn - init, RoundNearest)
 
-function total_rotation(placed, direction, full, exited)
-    Δ = direction == "ccw" ? placed - exited : exited - placed
-    Δ += Δ < 0 ? 2pi : 0
-    Δ += full*2pi
-    Δ = direction == "cw" ? Δ : -Δ
-    return Δ
-end
+# function total_rotation(placed, direction, full, exited)
+#     Δ = direction == "ccw" ? placed - exited : exited - placed
+#     Δ += Δ < 0 ? 2pi : 0
+#     Δ += full*2pi
+#     Δ = direction == "cw" ? Δ : -Δ
+#     return Δ
+# end
 
 df = CSV.read("data.csv", DataFrame, select = ["individual_number",
                                                "placed from",
@@ -63,12 +97,59 @@ select!(df, Not("placed from angle (degrees)",
                 "go down angle (degrees)",
                 "total absolute degrees of rotation"))
 
+transform!(df, "rotation 1 direction" => ByRow(==("cw")) => :cw)
+
+transform!(df, ["placed from angle", "go down angle", "cw", "full lap"] => ByRow(angular_range) => :placed2down)
+transform!(df, ["go down angle", "exit angle", "cw"] => ByRow(angular_range) => :down2exit)
+select!(df, Not("placed from angle", "go down angle", "cw", "full lap"))
+
 transform!(groupby(df, :individual_number), "exit angle" => (θs -> angle(sum(exp.(1im*θs)))) => :μ)
 
-transform!(df, ["μ", "placed from angle"] => ByRow(norm2init) => :placed)
-transform!(df, ["μ", "go down angle"] => ByRow(norm2init) => :descended)
-transform!(df, ["μ", "exit angle"] => ByRow(norm2init) => :exited)
-select!(df, Not("μ", "placed from angle", "go down angle", "exit angle"))
+transform!(df, [:μ, :placed2down] => ByRow((x, xs) -> xs .- x) => :placed2down)
+transform!(df, [:μ, :down2exit] => ByRow((x, xs) -> xs .- x) => :down2exit)
+select!(df, Not(:μ))
+
+function get_trs(θ, r)
+    a = 0.2
+    Point2f.(θ, r .+ a .* θ)
+end
+fig = Figure()
+for (i, (k, g)) in enumerate(pairs(groupby(df, :individual_number)))
+    # i, (k, g) = first(enumerate(pairs(groupby(df, :individual_number))))
+    ij = CartesianIndices((5, 6))[i]
+    ax = PolarAxis(fig[Tuple(ij)...], rgridvisible = false, theta_0 = pi/2, height = 200, width = 200)#, thetaticks = (range(0, length = 4, step = pi/2), string.(range(0, length = 4, step = 90)) .* "°"))
+    for (j, row) in enumerate(eachrow(g))
+        trs = get_trs(row.placed2down, 2j)
+        lines!(ax, trs, color = :black)
+        scatter!(ax, trs[end], color = :black)
+        trs = get_trs(row.down2exit, 2j)
+        lines!(ax, trs, color = :gray)
+        scatter!(ax, trs[end], color = :gray)
+        # trs = get_trs(row.placed, row.rotated2descent, 2j)
+        # scatter!(ax, trs[end], color = :gray)
+    end
+    hidedecorations!(ax)
+end
+resize_to_layout!(fig)
+
+display(fig)
+
+
+fig = Figure()
+ax = PolarAxis(fig[1,1], rgridvisible = false, theta_0 = pi/2, rlimits = (:origin, 4))
+i, (k, g) = first(enumerate(pairs(groupby(df, :individual_number))))
+(j, row) = first(enumerate(eachrow(g)))
+θs = [row.placed2down[1]; row.placed2down; row.down2exit]
+rs = [0; range(1, 1.1, 100); range(1.1, 3, 100)]
+lines!(ax, θs, rs)
+scatter!(ax, row.placed2down[end], 1.1, marker = :utriangle, markersize=50, rotation=row.placed2down[end]+π/2)
+scatter!(ax, row.down2exit[end], 3, marker = :utriangle, markersize=50, rotation=row.down2exit[end]+π/2)
+
+
+lkhfdshflshfsh
+
+
+
 
 transform!(df, :placed => ByRow(x -> x < 0 ? "ccw" : "cw") => "placed from")
 
