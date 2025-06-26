@@ -71,7 +71,6 @@ end
 # end
 
 df = CSV.read("data.csv", DataFrame, select = ["individual_number",
-                                               "placed from",
                                                "placed from angle (degrees)",
                                                "rotation 1 direction",
                                                "rotation category measured",
@@ -79,6 +78,8 @@ df = CSV.read("data.csv", DataFrame, select = ["individual_number",
                                                "go down angle (degrees)",
                                                "full lap", 
                                                "total absolute degrees of rotation"])
+
+transform!(groupby(df, :individual_number), :individual_number => (x -> 1:length(x)) => :n)
 
 subset!(df, "rotation category measured" => ByRow(∈(("cw", "ccw"))))
 @assert all(df[!, "rotation 1 direction"] .== df[!, "rotation category measured"])
@@ -101,7 +102,7 @@ transform!(df, "rotation 1 direction" => ByRow(==("cw")) => :cw)
 
 transform!(df, ["placed from angle", "go down angle", "cw", "full lap"] => ByRow(angular_range) => :placed2down)
 transform!(df, ["go down angle", "exit angle", "cw"] => ByRow(angular_range) => :down2exit)
-select!(df, Not("placed from angle", "go down angle", "cw", "full lap"))
+select!(df, Not("placed from angle", "go down angle", "full lap"))
 
 transform!(groupby(df, :individual_number), "exit angle" => (θs -> angle(sum(exp.(1im*θs)))) => :μ)
 
@@ -109,23 +110,107 @@ transform!(df, [:μ, :placed2down] => ByRow((x, xs) -> xs .- x) => :placed2down)
 transform!(df, [:μ, :down2exit] => ByRow((x, xs) -> xs .- x) => :down2exit)
 select!(df, Not(:μ))
 
-function get_trs(θ, r)
-    a = 0.2
-    Point2f.(θ, r .+ a .* θ)
+transform!(df, :placed2down => ByRow(x -> sign(sin(x[1])) > 0) => :placed_from_left)
+
+# sort!(df, :n)
+
+fig = Figure()
+for (i, (k, g)) in enumerate(pairs(groupby(df, :individual_number)))
+    ij = CartesianIndices((5, 6))[i]
+    ax = Axis(fig[Tuple(ij)...], aspect = DataAspect(), height = 200, width = 200)
+    for (j, row) in enumerate(eachrow(g))
+        radius = j + 1
+        poly!(ax, Makie.GeometryBasics.Polygon(Circle(zero(Point2f), radius+0.5), [Circle(zero(Point2f), radius-0.5)]), color = row.placed_from_left ? :blue : :green, alpha = 0.25)
+        color = (; color = row.cw ? :blue : :green)
+        lines!(ax, radius*Point2f.(reverse.(sincos.(row.placed2down .+ π/2))); color...)
+        α = row.placed2down[1]
+        α += row.cw ? π : 0
+        scatter!(ax, radius*Point2f(reverse(sincos(row.placed2down[1] + π/2))); color..., marker = :utriangle, markersize=10, rotation = α + π/2)
+        color = (; color = :red)
+        scatter!(ax, radius*Point2f(reverse(sincos(row.down2exit[end] + π/2))); color..., marker = '|', markersize=10, rotation=row.down2exit[end] + pi/2 + π/2)
+        # text!(ax, radius, 0; text = string(row.n), align = (:center, :center))
+    end
+    text!(ax, 0, 0; text = string(k.individual_number), align = (:center, :center))
+    hidedecorations!(ax)
+    hidespines!(ax)
 end
+resize_to_layout!(fig)
+
+display(fig)
+
+save("raw.png", fig)
+
+
+df2 = combine(groupby(df, :individual_number), [:placed_from_left, :cw] => ((x1, x2) -> round(Int, 100count(x1 .≠ x2)/length(x1))) => :longest, [:placed_from_left, :cw] => ((x1, x2) -> round(Int, 100count(x1 .== x2)/length(x1))) => :shortest, :cw => (x -> round(Int, 100count(!, x)/length(x))) => :ccw, :cw => (x -> round(Int, 100count(x)/length(x))) => :cw)
+
+lines(sort(df2, :shortest).shortest)
+
+lines(sort(df2, :handed).handed)
+
+
+ndividual_number  longest  shortest  ccw    cw    
+───────────────────────────────────────────────────
+                1       40        60     30     70
+                2       60        40     60     40
+                3       50        50     50     50
+                4       43        57      0    100
+                5       80        20     50     50
+                6       30        70     40     60
+                7       50        50     62     38
+                8       56        44     67     33
+                9      100         0     50     50
+               10       80        20     30     70
+               11       90        10     60     40
+               12       50        50     40     60
+               13       78        22     56     44
+               14       40        60     50     50
+               15       89        11     67     33
+               16       40        60     30     70
+               17       67        33     67     33
+               18       33        67     44     56
+               19       67        33     33     67
+               20       29        71     71     29
+               21       40        60     90     10
+               22       62        38     50     50
+               23       38        62     25     75
+               24       50        50     50     50
+               25       67        33     33     67
+               26       11        89     56     44
+               27       62        38     38     62
+               28       40        60     70     30
+               29       30        70     70     30
+               30       80        20     50     50
+
+
+
+
+sdjjfhgksdhfgskdhfgskdfg
+
+
 fig = Figure()
 for (i, (k, g)) in enumerate(pairs(groupby(df, :individual_number)))
     # i, (k, g) = first(enumerate(pairs(groupby(df, :individual_number))))
     ij = CartesianIndices((5, 6))[i]
-    ax = PolarAxis(fig[Tuple(ij)...], rgridvisible = false, theta_0 = pi/2, height = 200, width = 200)#, thetaticks = (range(0, length = 4, step = pi/2), string.(range(0, length = 4, step = 90)) .* "°"))
+    ax = PolarAxis(fig[Tuple(ij)...], rgridvisible = false, spinevisible = false, theta_0 = pi/2, height = 200, width = 200)#, thetaticks = (range(0, length = 4, step = pi/2), string.(range(0, length = 4, step = 90)) .* "°"))
     for (j, row) in enumerate(eachrow(g))
-        color = (; color = :black)
         r = fill(j, length(row.placed2down))
+        lines!(ax, range(0, 2pi, 100), r, color = row.placed_from_left ? :blue : :green, linewidth = 5, alpha = 0.25)
+        color = (; color = row.cw ? :blue : :green)
         lines!(ax, row.placed2down, r; color...)
         scatter!(ax, row.placed2down[1], j; color..., marker = '|', markersize=10, rotation=row.placed2down[1])
-        scatter!(ax, row.placed2down[end], j; color..., marker = :utriangle, markersize=10, rotation=row.placed2down[end]+π/2)
+        # θ = min(row.placed2down[1] + 0.2, row.placed2down[end])
+        ls = range(j*row.placed2down[1], j*row.placed2down[end], step = (pi)*sign(step(row.placed2down)))[2:end-1]
+        if isempty(ls)
+            ls = range(j*row.placed2down[50], j*row.placed2down[50])
+        end
+        for l in ls[1:1]
+            θ = l / j
+            α = θ + π/2
+            α += row.cw ? pi : 0
+            scatter!(ax, θ, j; color..., marker = :utriangle, markersize=10, rotation = α)
+        end
         color = (; color = :red)
-        lines!(ax, row.down2exit, r; color...)
+        # lines!(ax, row.down2exit, r; color...)
         scatter!(ax, row.down2exit[end], j; color..., marker = '|', markersize=10, rotation=row.down2exit[end])
     end
     hidedecorations!(ax)
@@ -138,16 +223,23 @@ display(fig)
 i, (k, g) = first(enumerate(pairs(groupby(df, :individual_number))))
 (j, row) = first(enumerate(eachrow(g)))
 fig = Figure()
-ax = PolarAxis(fig[1,1], rgridvisible = false, theta_0 = pi/2)
-color = (; color = :black)
-r = ones(length(row.placed2down))
-lines!(ax, row.placed2down, r; color...)
-scatter!(ax, row.placed2down[1], 1; color..., marker = '|', markersize=10, rotation=row.placed2down[1])
-scatter!(ax, row.placed2down[end], 1; color..., marker = :utriangle, markersize=10, rotation=row.placed2down[end]+π/2)
+ax = Axis(fig[1,1], aspect = DataAspect())
+lines!(Circle(zero(Point2f), j), color = row.placed_from_left ? :blue : :green, linewidth = 5, alpha = 0.25)
+color = (; color = row.cw ? :blue : :green)
+lines!(ax, j*Point2f.(reverse.(sincos.(row.placed2down))); color...)
+scatter!(ax, j*Point2f(reverse(sincos(row.placed2down[1]))); color..., marker = '|', markersize=10, rotation=row.placed2down[1] + pi/2)
+ls = range(j*row.placed2down[1], j*row.placed2down[end], step = (pi)*sign(step(row.placed2down)))
+if length(ls) < 2
+    l = j*row.placed2down[50]
+else
+    l = ls[2]
+end
+θ = l / j
+α = θ
+α += row.cw ? pi : 0
+scatter!(ax, j*Point2f(reverse(sincos(θ))); color..., marker = :utriangle, markersize=10, rotation = α)
 color = (; color = :red)
-lines!(ax, row.down2exit, r; color...)
-scatter!(ax, row.down2exit[end], 1; color..., marker = '|', markersize=10, rotation=row.down2exit[end])
-hidedecorations!(ax)
+scatter!(ax, j*Point2f(reverse(sincos(row.down2exit[end]))); color..., marker = '|', markersize=10, rotation=row.down2exit[end] + pi/2)
 
 
 lkhfdshflshfsh
@@ -187,7 +279,6 @@ select!(df, Not("total absolute degrees of rotation"))
 # rename!(df, :x1 => :r)
 
 
-sort!(df, ["individual_number", "placed from", "rotated2descent"])
 
 function get_trs(θ₁, rotated, r)
     a = 0.2
