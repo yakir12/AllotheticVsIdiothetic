@@ -119,14 +119,14 @@ for (i, (k, g)) in enumerate(pairs(groupby(df, :individual_number)))
     ij = CartesianIndices((5, 6))[i]
     ax = PolarAxis(fig[Tuple(ij)...], rgridvisible = false, theta_0 = pi/2, height = 200, width = 200)#, thetaticks = (range(0, length = 4, step = pi/2), string.(range(0, length = 4, step = 90)) .* "°"))
     for (j, row) in enumerate(eachrow(g))
-        trs = get_trs(row.placed2down, 2j)
-        lines!(ax, trs, color = :black)
-        scatter!(ax, trs[end], color = :black)
-        trs = get_trs(row.down2exit, 2j)
-        lines!(ax, trs, color = :gray)
-        scatter!(ax, trs[end], color = :gray)
-        # trs = get_trs(row.placed, row.rotated2descent, 2j)
-        # scatter!(ax, trs[end], color = :gray)
+        color = (; color = :black)
+        r = fill(j, length(row.placed2down))
+        lines!(ax, row.placed2down, r; color...)
+        scatter!(ax, row.placed2down[1], j; color..., marker = '|', markersize=10, rotation=row.placed2down[1])
+        scatter!(ax, row.placed2down[end], j; color..., marker = :utriangle, markersize=10, rotation=row.placed2down[end]+π/2)
+        color = (; color = :red)
+        lines!(ax, row.down2exit, r; color...)
+        scatter!(ax, row.down2exit[end], j; color..., marker = '|', markersize=10, rotation=row.down2exit[end])
     end
     hidedecorations!(ax)
 end
@@ -135,15 +135,19 @@ resize_to_layout!(fig)
 display(fig)
 
 
-fig = Figure()
-ax = PolarAxis(fig[1,1], rgridvisible = false, theta_0 = pi/2, rlimits = (:origin, 4))
 i, (k, g) = first(enumerate(pairs(groupby(df, :individual_number))))
 (j, row) = first(enumerate(eachrow(g)))
-θs = [row.placed2down[1]; row.placed2down; row.down2exit]
-rs = [0; range(1, 1.1, 100); range(1.1, 3, 100)]
-lines!(ax, θs, rs)
-scatter!(ax, row.placed2down[end], 1.1, marker = :utriangle, markersize=50, rotation=row.placed2down[end]+π/2)
-scatter!(ax, row.down2exit[end], 3, marker = :utriangle, markersize=50, rotation=row.down2exit[end]+π/2)
+fig = Figure()
+ax = PolarAxis(fig[1,1], rgridvisible = false, theta_0 = pi/2)
+color = (; color = :black)
+r = ones(length(row.placed2down))
+lines!(ax, row.placed2down, r; color...)
+scatter!(ax, row.placed2down[1], 1; color..., marker = '|', markersize=10, rotation=row.placed2down[1])
+scatter!(ax, row.placed2down[end], 1; color..., marker = :utriangle, markersize=10, rotation=row.placed2down[end]+π/2)
+color = (; color = :red)
+lines!(ax, row.down2exit, r; color...)
+scatter!(ax, row.down2exit[end], 1; color..., marker = '|', markersize=10, rotation=row.down2exit[end])
+hidedecorations!(ax)
 
 
 lkhfdshflshfsh
