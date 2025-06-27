@@ -104,6 +104,7 @@ transform!(df, ["placed from angle", "go down angle", "cw", "full lap"] => ByRow
 transform!(df, ["go down angle", "exit angle", "cw"] => ByRow(angular_range) => :down2exit)
 select!(df, Not("placed from angle", "go down angle", "full lap"))
 
+# transform!(groupby(df, :individual_number), :down2exit => (θs -> angle(sum(exp.(1im*first.(θs))))) => :μ)
 transform!(groupby(df, :individual_number), "exit angle" => (θs -> angle(sum(exp.(1im*θs)))) => :μ)
 
 transform!(df, [:μ, :placed2down] => ByRow((x, xs) -> xs .- x) => :placed2down)
@@ -112,7 +113,11 @@ select!(df, Not(:μ))
 
 transform!(df, :placed2down => ByRow(x -> sign(sin(x[1])) > 0) => :placed_from_left)
 
-# sort!(df, :n)
+transform!(df, :placed2down => ByRow(x -> sum(abs, diff(x))) => :dance)
+transform!(df, :down2exit => ByRow(x -> sum(abs, diff(x))) => :work)
+transform!(df, :down2exit => ByRow(x -> abs(x[end])) => :deviation)
+
+sort!(df, :deviation)
 
 fig = Figure()
 for (i, (k, g)) in enumerate(pairs(groupby(df, :individual_number)))
@@ -141,50 +146,37 @@ display(fig)
 save("raw.png", fig)
 
 
-df2 = combine(groupby(df, :individual_number), [:placed_from_left, :cw] => ((x1, x2) -> round(Int, 100count(x1 .≠ x2)/length(x1))) => :longest, [:placed_from_left, :cw] => ((x1, x2) -> round(Int, 100count(x1 .== x2)/length(x1))) => :shortest, :cw => (x -> round(Int, 100count(!, x)/length(x))) => :ccw, :cw => (x -> round(Int, 100count(x)/length(x))) => :cw)
+sort!(df, [:placed_from_left, :cw])
+fig = Figure()
+ax = Axis(fig[1,1], aspect = DataAspect())
+for (j, row) in enumerate(eachrow(df))
+    @show row.placed_from_left
+    radius = j + 1
+    poly!(ax, Makie.GeometryBasics.Polygon(Circle(zero(Point2f), radius+0.5), [Circle(zero(Point2f), radius-0.5)]), color = row.placed_from_left ? :blue : :green, alpha = 0.25)
+    color = (; color = row.cw ? :blue : :green)
+    lines!(ax, radius*Point2f.(reverse.(sincos.(row.placed2down .+ π/2))); color...)
+    α = row.placed2down[1]
+    α += row.cw ? π : 0
+    scatter!(ax, radius*Point2f(reverse(sincos(row.placed2down[1] + π/2))); color..., marker = :utriangle, markersize=10, rotation = α + π/2)
+    color = (; color = :red)
+    scatter!(ax, radius*Point2f(reverse(sincos(row.down2exit[end] + π/2))); color..., marker = '|', markersize=10, rotation=row.down2exit[end] + pi/2 + π/2)
+end
+hidedecorations!(ax)
+hidespines!(ax)
 
-lines(sort(df2, :shortest).shortest)
-
-lines(sort(df2, :handed).handed)
 
 
-ndividual_number  longest  shortest  ccw    cw    
-───────────────────────────────────────────────────
-                1       40        60     30     70
-                2       60        40     60     40
-                3       50        50     50     50
-                4       43        57      0    100
-                5       80        20     50     50
-                6       30        70     40     60
-                7       50        50     62     38
-                8       56        44     67     33
-                9      100         0     50     50
-               10       80        20     30     70
-               11       90        10     60     40
-               12       50        50     40     60
-               13       78        22     56     44
-               14       40        60     50     50
-               15       89        11     67     33
-               16       40        60     30     70
-               17       67        33     67     33
-               18       33        67     44     56
-               19       67        33     33     67
-               20       29        71     71     29
-               21       40        60     90     10
-               22       62        38     50     50
-               23       38        62     25     75
-               24       50        50     50     50
-               25       67        33     33     67
-               26       11        89     56     44
-               27       62        38     38     62
-               28       40        60     70     30
-               29       30        70     70     30
-               30       80        20     50     50
+
+
+
+df2 = combine(groupby(df, :individual_number), [:placed_from_left, :cw] => ((x1, x2) -> round(Int, 100count(x1 .≠ x2)/length(x1))) => :longest, [:placed_from_left, :cw] => ((x1, x2) -> round(Int, 100count(x1 .== x2)/length(x1))) => :shortest, :cw => (x -> round(Int, 100count(!, x)/length(x))) => :ccw, :cw => (x -> round(Int, 100count(x)/length(x))) => :cw, :placed2down => (x -> round(Int, 100count(x -> sum(abs, diff(x)) < π, x)/length(x))) => :shortest_dance)
 
 
 
 
 sdjjfhgksdhfgskdhfgskdfg
+
+
 
 
 fig = Figure()
