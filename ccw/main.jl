@@ -2,6 +2,7 @@ using Statistics
 using CSV, DataFrames
 using GLMakie, AlgebraOfGraphics
 using GLM
+using Random
 
 function angular_range(start, stop, length, cw, fullturns)
     if start < stop
@@ -117,7 +118,8 @@ transform!(df, :placed2down => ByRow(x -> sum(abs, diff(x))) => :dance)
 transform!(df, :down2exit => ByRow(x -> sum(abs, diff(x))) => :work)
 transform!(df, :down2exit => ByRow(x -> abs(x[end])) => :deviation)
 
-sort!(df, :deviation)
+shuffle!(df)
+sort!(df, [:placed_from_left, :cw, order(:placed2down, by = x -> first(x) + 10000)])
 
 fig = Figure()
 for (i, (k, g)) in enumerate(pairs(groupby(df, :individual_number)))
@@ -141,16 +143,60 @@ for (i, (k, g)) in enumerate(pairs(groupby(df, :individual_number)))
 end
 resize_to_layout!(fig)
 
-display(fig)
+# display(fig)
 
-save("raw.png", fig)
+save("centered to mean exit.png", fig)
 
 
-sort!(df, [:placed_from_left, :cw])
+transform!(groupby(df, :individual_number), :placed2down => (θs -> angle(sum(exp.(1im*last(θs))))) => :μ)
+
+transform!(df, [:μ, :placed2down] => ByRow((x, xs) -> xs .- x) => :placed2down)
+transform!(df, [:μ, :down2exit] => ByRow((x, xs) -> xs .- x) => :down2exit)
+select!(df, Not(:μ))
+
+transform!(df, :placed2down => ByRow(x -> sign(sin(x[1])) > 0) => :placed_from_left)
+
+shuffle!(df)
+sort!(df, [:placed_from_left, :cw, order(:placed2down, by = x -> first(x) + 10000)])
+
 fig = Figure()
+for (i, (k, g)) in enumerate(pairs(groupby(df, :individual_number)))
+    ij = CartesianIndices((5, 6))[i]
+    ax = Axis(fig[Tuple(ij)...], aspect = DataAspect(), height = 200, width = 200)
+    for (j, row) in enumerate(eachrow(g))
+        radius = j + 1
+        poly!(ax, Makie.GeometryBasics.Polygon(Circle(zero(Point2f), radius+0.5), [Circle(zero(Point2f), radius-0.5)]), color = row.placed_from_left ? :blue : :green, alpha = 0.25)
+        color = (; color = row.cw ? :blue : :green)
+        lines!(ax, radius*Point2f.(reverse.(sincos.(row.placed2down .+ π/2))); color...)
+        α = row.placed2down[1]
+        α += row.cw ? π : 0
+        scatter!(ax, radius*Point2f(reverse(sincos(row.placed2down[1] + π/2))); color..., marker = :utriangle, markersize=10, rotation = α + π/2)
+        color = (; color = :red)
+        scatter!(ax, radius*Point2f(reverse(sincos(row.down2exit[end] + π/2))); color..., marker = '|', markersize=10, rotation=row.down2exit[end] + pi/2 + π/2)
+        # text!(ax, radius, 0; text = string(row.n), align = (:center, :center))
+    end
+    text!(ax, 0, 0; text = string(k.individual_number), align = (:center, :center))
+    hidedecorations!(ax)
+    hidespines!(ax)
+end
+resize_to_layout!(fig)
+
+# display(fig)
+
+save("centered to mean down from ball.png", fig)
+
+
+
+transform!(df, :placed2down => ByRow(xs -> xs .- last(xs)) => :placed2down)
+transform!(df, :down2exit => ByRow(xs -> xs .- first(xs)) => :down2exit)
+transform!(df, :placed2down => ByRow(x -> sign(sin(x[1])) > 0) => :placed_from_left)
+
+shuffle!(df)
+sort!(df, [:placed_from_left, :cw, order(:placed2down, by = x -> first(x) + 10000)])
+
+fig = Figure(size = (2000, 2000))
 ax = Axis(fig[1,1], aspect = DataAspect())
 for (j, row) in enumerate(eachrow(df))
-    @show row.placed_from_left
     radius = j + 1
     poly!(ax, Makie.GeometryBasics.Polygon(Circle(zero(Point2f), radius+0.5), [Circle(zero(Point2f), radius-0.5)]), color = row.placed_from_left ? :blue : :green, alpha = 0.25)
     color = (; color = row.cw ? :blue : :green)
@@ -164,12 +210,13 @@ end
 hidedecorations!(ax)
 hidespines!(ax)
 
+save("aligned to down from ball.png", fig)
 
 
 
 
 
-df2 = combine(groupby(df, :individual_number), [:placed_from_left, :cw] => ((x1, x2) -> round(Int, 100count(x1 .≠ x2)/length(x1))) => :longest, [:placed_from_left, :cw] => ((x1, x2) -> round(Int, 100count(x1 .== x2)/length(x1))) => :shortest, :cw => (x -> round(Int, 100count(!, x)/length(x))) => :ccw, :cw => (x -> round(Int, 100count(x)/length(x))) => :cw, :placed2down => (x -> round(Int, 100count(x -> sum(abs, diff(x)) < π, x)/length(x))) => :shortest_dance)
+# df2 = combine(groupby(df, :individual_number), [:placed_from_left, :cw] => ((x1, x2) -> round(Int, 100count(x1 .≠ x2)/length(x1))) => :longest, [:placed_from_left, :cw] => ((x1, x2) -> round(Int, 100count(x1 .== x2)/length(x1))) => :shortest, :cw => (x -> round(Int, 100count(!, x)/length(x))) => :ccw, :cw => (x -> round(Int, 100count(x)/length(x))) => :cw, :placed2down => (x -> round(Int, 100count(x -> sum(abs, diff(x)) < π, x)/length(x))) => :shortest_dance)
 
 
 
