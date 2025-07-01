@@ -3,8 +3,9 @@ using CSV, DataFrames
 using GLMakie, AlgebraOfGraphics
 using GLM
 using Random
+using Optim
 
-function angular_range(start, stop, length, cw, fullturns)
+function dance(start, stop, cw, fullturns)
     if start < stop
         if cw 
             stop -= (fullturns + 1)*2π #
@@ -20,21 +21,19 @@ function angular_range(start, stop, length, cw, fullturns)
     else
         throw(ArgumentError("start and stop can't be equal"))
     end
-    return range(start, stop, length) 
+    return stop - start
 end
 
-angular_range(start, stop, cw, fullturns) = angular_range(start, stop, 100, cw, fullturns)
-
-function angular_range(start, stop, lastcw)
+function dance(start, stop, lastcw)
     if start < stop
-        angular_range(start, stop, false, 0)
+        dance(start, stop, false, 0)
     elseif start > stop
-        angular_range(start, stop, true, 0)
+        dance(start, stop, true, 0)
     else
         if lastcw
-            angular_range(start, stop - 0.01, lastcw, 0)
+            dance(start, stop - 0.01, lastcw, 0)
         else
-            angular_range(start, stop + 0.01, lastcw, 0)
+            dance(start, stop + 0.01, lastcw, 0)
         end
     end
 end
@@ -80,7 +79,7 @@ df = CSV.read("data.csv", DataFrame, select = ["individual_number",
                                                "full lap", 
                                                "total absolute degrees of rotation"])
 
-transform!(groupby(df, :individual_number), :individual_number => (x -> 1:length(x)) => :n)
+# transform!(groupby(df, :individual_number), :individual_number => (x -> 1:length(x)) => :n)
 
 subset!(df, "rotation category measured" => ByRow(∈(("cw", "ccw"))))
 @assert all(df[!, "rotation 1 direction"] .== df[!, "rotation category measured"])
@@ -101,25 +100,70 @@ select!(df, Not("placed from angle (degrees)",
 
 transform!(df, "rotation 1 direction" => ByRow(==("cw")) => :cw)
 
-transform!(df, ["placed from angle", "go down angle", "cw", "full lap"] => ByRow(angular_range) => :placed2down)
-transform!(df, ["go down angle", "exit angle", "cw"] => ByRow(angular_range) => :down2exit)
-select!(df, Not("placed from angle", "go down angle", "full lap"))
+transform!(df, ["placed from angle", "go down angle", "cw", "full lap"] => ByRow(dance) => :placed2down)
+rename!(df, "placed from angle" => :start)
 
-# transform!(groupby(df, :individual_number), :down2exit => (θs -> angle(sum(exp.(1im*first.(θs))))) => :μ)
-transform!(groupby(df, :individual_number), "exit angle" => (θs -> angle(sum(exp.(1im*θs)))) => :μ)
+transform!(df, ["go down angle", "exit angle", "cw"] => ByRow(dance) => :down2exit)
+# rename!(df, "go down angle" => :down)
+rename!(df, "exit angle" => :exit)
 
-transform!(df, [:μ, :placed2down] => ByRow((x, xs) -> xs .- x) => :placed2down)
-transform!(df, [:μ, :down2exit] => ByRow((x, xs) -> xs .- x) => :down2exit)
-select!(df, Not(:μ))
+select!(df, Not("go down angle", "full lap"))
 
-transform!(df, :placed2down => ByRow(x -> sign(sin(x[1])) > 0) => :placed_from_left)
+# @assert all(
 
-transform!(df, :placed2down => ByRow(x -> sum(abs, diff(x))) => :dance)
-transform!(df, :down2exit => ByRow(x -> sum(abs, diff(x))) => :work)
-transform!(df, :down2exit => ByRow(x -> abs(x[end])) => :deviation)
+# for row in eachrow(df)
+#     θ1 = row.start + row.placed2down
+#     θ2 = row.down
+#     if !isapprox(rem2pi(θ1, RoundNearest), rem2pi(θ2, RoundNearest), atol = 1e-10)
+#         @show rem2pi(θ1, RoundNearest), rem2pi(θ2, RoundNearest)
+#     end
+# end
+
+transform!(groupby(df, :individual_number), :exit => (θs -> angle(sum(exp, 1im*θs))) => :μ)
+
+# transform!(df, [:start, :μ] => ByRow((start, μ) -> rem2pi(start - μ, RoundNearest)) => :start)
+# select!(df, Not(:μ, :exit))
+
+
+# transform!(df, :start => ByRow(x -> sign(sin(x)) > 0) => :placed_from_left)
+
+# transform!(df, :placed2down => ByRow(x -> sum(abs, diff(x))) => :dance)
+# transform!(df, :down2exit => ByRow(x -> sum(abs, diff(x))) => :work)
+# transform!(df, :down2exit => ByRow(x -> abs(x[end])) => :deviation)
+
+
+# display(fig)
+
+# save("centered to mean exit.png", fig)
+
+function to_minimize(start, placed2down, μ)
+    start2 = rem2pi.(start .- μ, RoundNearest)
+    r = [first(findmin(i -> abs(y - (i*2π - x)), -2:2)) for (x, y) in zip(start2, placed2down)]
+    sum(r)
+end
+
+transform!(groupby(df, :individual_number), [:start, :placed2down] => ((start, placed2down) -> optimize(μ -> to_minimize(start, placed2down, μ), -pi, pi).minimizer) => :μ2)
+
+transform!(df, [:start, :μ2] => ByRow((start, μ) -> rem2pi(start - μ, RoundNearest)) => :start)
+
+fig = (data(df) * mapping(:start => rad2deg =>  "Placed down (°)", :placed2down => rad2deg => "Danced (°)") * visual(Scatter; label = "data") + data(DataFrame(a = 360 .* (-2:2), b = -1)) * mapping(:a, :b) * visual(ABLines; color = :red, label = "y = -x")) |> draw(; axis = (; xticks = -180:180:180, yticks = -720:180:720 , aspect = DataAspect(), width = 200))
+resize_to_layout!(fig)
+
+save("relationship.png", fig)
+
+transform!(df, [:start, :placed2down] => ByRow((x, y) -> findmin(i -> abs(y - (i*2π - x)), -2:2)) => [:r, :i])
+
+fig = (data(df) * mapping(:start => rad2deg =>  "Placed down (°)", :placed2down => rad2deg => "Danced (°)", color = :i => nonnumeric, layout = :individual_number => nonnumeric) * visual(Scatter; label = "data") + data(DataFrame(a = 360 .* (-2:2), b = -1)) * mapping(:a, :b) * visual(ABLines; color = :red, label = "y = -x")) |> draw(; axis = (; xticks = -180:180:180, yticks = -720:180:720, aspect = DataAspect(), height = 200))
+resize_to_layout!(fig)
+
+save("relationship2.png", fig)
+
+transform!(df, :start => ByRow(x -> sign(sin(x)) > 0) => :placed_from_left)
+
+# fig = (data(df) * mapping(:start => rad2deg =>  "Placed down (°)", :placed2down => rad2deg => "Danced (°)", layout = :individual_number => nonnumeric) * visual(Scatter; label = "data") + data(DataFrame(a = 360 .* (-2:2), b = -1)) * mapping(:a, :b) * visual(ABLines; color = :red, label = "y = -x")) |> draw(; axis = (; xticks = -180:180:180, yticks = -720:180:720, aspect = DataAspect(), width = 200))
 
 shuffle!(df)
-sort!(df, [:placed_from_left, :cw, order(:placed2down, by = x -> first(x) + 10000)])
+sort!(df, [:placed_from_left, :cw, :start])
 
 fig = Figure()
 for (i, (k, g)) in enumerate(pairs(groupby(df, :individual_number)))
@@ -129,13 +173,12 @@ for (i, (k, g)) in enumerate(pairs(groupby(df, :individual_number)))
         radius = j + 1
         poly!(ax, Makie.GeometryBasics.Polygon(Circle(zero(Point2f), radius+0.5), [Circle(zero(Point2f), radius-0.5)]), color = row.placed_from_left ? :blue : :green, alpha = 0.25)
         color = (; color = row.cw ? :blue : :green)
-        lines!(ax, radius*Point2f.(reverse.(sincos.(row.placed2down .+ π/2))); color...)
-        α = row.placed2down[1]
-        α += row.cw ? π : 0
-        scatter!(ax, radius*Point2f(reverse(sincos(row.placed2down[1] + π/2))); color..., marker = :utriangle, markersize=10, rotation = α + π/2)
-        color = (; color = :red)
-        scatter!(ax, radius*Point2f(reverse(sincos(row.down2exit[end] + π/2))); color..., marker = '|', markersize=10, rotation=row.down2exit[end] + pi/2 + π/2)
-        # text!(ax, radius, 0; text = string(row.n), align = (:center, :center))
+        ts = row.start .+ range(0, row.placed2down, length = 100)
+        lines!(ax, radius*Point2f.(reverse.(sincos.(ts .+ π/2))); color...)
+        α = row.start + row.placed2down
+        α += row.cw ? -π/2 : π/2
+        scatter!(ax, radius*Point2f(reverse(sincos(row.start + π/2))); color..., marker = '|', markersize=10, rotation = row.start + pi/2 + π/2)
+        scatter!(ax, radius*Point2f(reverse(sincos(row.start + row.placed2down + π/2))); color..., marker = :utriangle, markersize=10, rotation=α)
     end
     text!(ax, 0, 0; text = string(k.individual_number), align = (:center, :center))
     hidedecorations!(ax)
@@ -143,10 +186,14 @@ for (i, (k, g)) in enumerate(pairs(groupby(df, :individual_number)))
 end
 resize_to_layout!(fig)
 
-# display(fig)
+save("centered to ideal down from ball.png", fig)
 
-save("centered to mean exit.png", fig)
+df2 = combine(groupby(df, :individual_number), [:placed_from_left, :cw] => ((x1, x2) -> round(Int, 100count(x1 .≠ x2)/length(x1))) => :longest, [:placed_from_left, :cw] => ((x1, x2) -> round(Int, 100count(x1 .== x2)/length(x1))) => :shortest, :cw => (x -> round(Int, 100count(!, x)/length(x))) => :ccw, :cw => (x -> round(Int, 100count(x)/length(x))) => :cw, :placed2down => (x -> round(Int, 100count(x -> abs(x) < π, x)/length(x))) => :shortest_dance)
 
+mean.(eachcol(df2))
+
+
+fjhsdkfhlsakhfs
 
 transform!(groupby(df, :individual_number), :placed2down => (θs -> angle(sum(exp.(1im*last(θs))))) => :μ)
 
@@ -216,7 +263,6 @@ save("aligned to down from ball.png", fig)
 
 
 
-# df2 = combine(groupby(df, :individual_number), [:placed_from_left, :cw] => ((x1, x2) -> round(Int, 100count(x1 .≠ x2)/length(x1))) => :longest, [:placed_from_left, :cw] => ((x1, x2) -> round(Int, 100count(x1 .== x2)/length(x1))) => :shortest, :cw => (x -> round(Int, 100count(!, x)/length(x))) => :ccw, :cw => (x -> round(Int, 100count(x)/length(x))) => :cw, :placed2down => (x -> round(Int, 100count(x -> sum(abs, diff(x)) < π, x)/length(x))) => :shortest_dance)
 
 
 
