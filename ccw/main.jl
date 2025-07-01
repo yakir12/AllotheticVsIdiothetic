@@ -144,23 +144,25 @@ end
 
 transform!(groupby(df, :individual_number), [:start, :placed2down] => ((start, placed2down) -> optimize(μ -> to_minimize(start, placed2down, μ), -pi, pi).minimizer) => :μ2)
 
-transform!(df, [:start, :μ2] => ByRow((start, μ) -> rem2pi(start - μ, RoundNearest)) => :start)
+transform!(df, [:start, :μ] => ByRow((start, μ) -> rem2pi(start - μ, RoundNearest)) => :start)
 
-fig = (data(df) * mapping(:start => rad2deg =>  "Placed down (°)", :placed2down => rad2deg => "Danced (°)") * visual(Scatter; label = "data") + data(DataFrame(a = 360 .* (-2:2), b = -1)) * mapping(:a, :b) * visual(ABLines; color = :red, label = "y = -x")) |> draw(; axis = (; xticks = -180:180:180, yticks = -720:180:720 , aspect = DataAspect(), width = 200))
+fig = (data(df) * mapping(:start => rad2deg =>  "Placed down (°)", :placed2down => rad2deg => "Danced (°)") * visual(Scatter; label = "data") + data(DataFrame(a = 360 .* (-2:2), b = -1, color = ["longest", "longer", "shortest", "longer", "longest"])) * mapping(:a, :b, color = :color => sorter("shortest", "longer", "longest")) * visual(ABLines; label = "y = -x")) |> draw(; axis = (; xticks = -180:180:180, yticks = -720:180:720 , aspect = DataAspect(), width = 200))
 resize_to_layout!(fig)
 
 save("relationship.png", fig)
 
 transform!(df, [:start, :placed2down] => ByRow((x, y) -> findmin(i -> abs(y - (i*2π - x)), -2:2)) => [:r, :i])
 
-fig = (data(df) * mapping(:start => rad2deg =>  "Placed down (°)", :placed2down => rad2deg => "Danced (°)", color = :i => nonnumeric, layout = :individual_number => nonnumeric) * visual(Scatter; label = "data") + data(DataFrame(a = 360 .* (-2:2), b = -1)) * mapping(:a, :b) * visual(ABLines; color = :red, label = "y = -x")) |> draw(; axis = (; xticks = -180:180:180, yticks = -720:180:720, aspect = DataAspect(), height = 200))
+fig = (data(df) * mapping(:start => rad2deg =>  "Placed down (°)", :placed2down => rad2deg => "Danced (°)", layout = :individual_number => nonnumeric) * visual(Scatter; label = "data") + data(DataFrame(a = 360 .* (-2:2), b = -1, color = ["longest", "longer", "shortest", "longer", "longest"])) * mapping(:a, :b, color = :color => sorter("shortest", "longer", "longest")) * visual(ABLines; label = "y = -x")) |> draw(; axis = (; aspect = DataAspect(), xticks = -180:180:180, yticks = -720:180:720, height = 200))
 resize_to_layout!(fig)
-
 save("relationship2.png", fig)
 
 transform!(df, :start => ByRow(x -> sign(sin(x)) > 0) => :placed_from_left)
 
 # fig = (data(df) * mapping(:start => rad2deg =>  "Placed down (°)", :placed2down => rad2deg => "Danced (°)", layout = :individual_number => nonnumeric) * visual(Scatter; label = "data") + data(DataFrame(a = 360 .* (-2:2), b = -1)) * mapping(:a, :b) * visual(ABLines; color = :red, label = "y = -x")) |> draw(; axis = (; xticks = -180:180:180, yticks = -720:180:720, aspect = DataAspect(), width = 200))
+
+wrap90(x) = mod(x, -(π/2)..(π/2))
+scatter(wrap90.(df.start), df.placed2down)
 
 shuffle!(df)
 sort!(df, [:placed_from_left, :cw, :start])
