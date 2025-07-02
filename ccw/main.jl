@@ -146,10 +146,29 @@ transform!(groupby(df, :individual_number), [:start, :placed2down] => ((start, p
 
 transform!(df, [:start, :μ] => ByRow((start, μ) -> rem2pi(start - μ, RoundNearest)) => :start)
 
-fig = (data(df) * mapping(:start => rad2deg =>  "Placed down (°)", :placed2down => rad2deg => "Danced (°)") * visual(Scatter; label = "data") + data(DataFrame(a = 360 .* (-2:2), b = -1, color = ["longest", "longer", "shortest", "longer", "longest"])) * mapping(:a, :b, color = :color => sorter("shortest", "longer", "longest")) * visual(ABLines; label = "y = -x")) |> draw(; axis = (; xticks = -180:180:180, yticks = -720:180:720 , aspect = DataAspect(), width = 200))
+fig = (data(df) * mapping(:start => rad2deg =>  "Placed down (°)", :placed2down => rad2deg => "Danced (°)") * visual(Scatter; alpha = 0.5, label = "data") + data(DataFrame(a = 360 .* (-2:2), b = -1, color = ["longest", "longer", "shortest", "longer", "longest"])) * mapping(:a, :b, color = :color => sorter("shortest", "longer", "longest")) * visual(ABLines; label = "y = -x")) |> draw(; axis = (; xticks = -180:180:180, yticks = -720:180:720 , aspect = DataAspect(), width = 200))
 resize_to_layout!(fig)
 
 save("relationship.png", fig)
+
+# fig = Figure()
+# ax = Axis(fig[1,1], aspect = DataAspect())
+# hexbin!(ax, df.start, df.placed2down, cellsize = (1, 1), threshold = 0, colormap = [Makie.to_color(:transparent); Makie.to_colormap(:viridis)],
+#     strokewidth = 0.5,
+#     strokecolor = :gray50,
+#     colorscale = Makie.pseudolog10)
+#
+# fig = Figure()
+# ax = Axis(fig[1,1], aspect = DataAspect(), xticks = -180:90:180, yticks = -720:180:720)
+# datashader!(ax, Point2f.(rad2deg.(df.start), rad2deg.(df.placed2down)), binsize = 10, colormap=[:transparent, :black], async = false)
+# ablines!(360 .* (-2:2), -1, label = ["longest", "longer", "shortest", "longer", "longest"])
+
+# df2 = combine(groupby(df, [:start, :placed2down]), nrow)
+# tricontourf(df2.start, df2.placed2down, df2.nrow)
+
+# df2 = combine(groupby(df, [:start, :placed2down]), nrow)
+# heatmap(df2.start, df2.placed2down, df2.nrow)
+
 
 transform!(df, [:start, :placed2down] => ByRow((x, y) -> findmin(i -> abs(y - (i*2π - x)), -2:2)) => [:r, :i])
 
