@@ -119,7 +119,6 @@ select!(df, Not("go down angle", "full lap"))
 #     end
 # end
 
-transform!(groupby(df, :individual_number), :exit => (θs -> angle(sum(exp, 1im*θs))) => :μ)
 
 # transform!(df, [:start, :μ] => ByRow((start, μ) -> rem2pi(start - μ, RoundNearest)) => :start)
 # select!(df, Not(:μ, :exit))
@@ -142,14 +141,26 @@ function to_minimize(start, placed2down, μ)
     sum(r)
 end
 
-transform!(groupby(df, :individual_number), [:start, :placed2down] => ((start, placed2down) -> optimize(μ -> to_minimize(start, placed2down, μ), -pi, pi).minimizer) => :μ2)
+transform!(groupby(df, :individual_number), :exit => (θs -> angle(sum(exp, 1im*θs))) => :mean_exit, [:start, :placed2down] => ((s, p) -> angle(sum(exp, 1im*(s .+ p)))) => :mean_down, [:start, :placed2down] => ((start, placed2down) -> optimize(μ -> to_minimize(start, placed2down, μ), -pi, pi).minimizer) => :optimal)
 
-transform!(df, [:start, :μ] => ByRow((start, μ) -> rem2pi(start - μ, RoundNearest)) => :start)
-
-fig = (data(df) * mapping(:start => rad2deg =>  "Placed down (°)", :placed2down => rad2deg => "Danced (°)") * visual(Scatter; alpha = 0.5, label = "data") + data(DataFrame(a = 360 .* (-2:2), b = -1, color = ["longest", "longer", "shortest", "longer", "longest"])) * mapping(:a, :b, color = :color => sorter("shortest", "longer", "longest")) * visual(ABLines; label = "y = -x")) |> draw(; axis = (; xticks = -180:180:180, yticks = -720:180:720 , aspect = DataAspect(), width = 200))
+fig = data(df) * (mapping(:mean_exit => rad2deg => "Mean exit", :mean_down => rad2deg) * visual(Scatter; label = "Mean down") + mapping(:mean_exit => rad2deg => "Mean exit", :optimal => rad2deg) * visual(Scatter; color = :red, label = "Mean optimal") + pregrouped([0], [1]) * visual(ABLines; color = :gray, label = "y = x")) |> draw(; axis = (; xticks = [-180, 0, 180], xtickformat = "{:n}°", yticks = -180:180:180, ytickformat = "{:n}°", aspect = DataAspect(), width = 200, limits = ((-190, 190),(-190, 190))))
 resize_to_layout!(fig)
 
-save("relationship.png", fig)
+save("means.png", fig)
+
+
+
+for μ in (:mean_exit, :mean_down, :optimal)
+    df2 = transform(df, [:start, μ] => ByRow((start, μ) -> rem2pi(start - μ, RoundNearest)) => :start)
+
+    fig = (data(df2) * mapping(:start => rad2deg =>  "Placed", :placed2down => rad2deg => "Danced") * visual(Scatter; alpha = 0.5, label = "data") + data(DataFrame(a = 360 .* (-2:2), b = -1, color = ["longest", "longer", "shortest", "longer", "longest"])) * mapping(:a, :b, color = :color => sorter("shortest", "longer", "longest") => "") * visual(ABLines; label = "y = -x") + data(DataFrame(x = [-160, 160])) * mapping(:x) * visual(VLines; color = :gray, linestyle = :dash, label = "Error margins")) |> draw(; axis = (; xticks = [-160, 0, 160], xtickformat = "{:n}°", yticks = -720:180:720, ytickformat = "{:n}°", aspect = DataAspect(), width = 200))
+    resize_to_layout!(fig)
+
+    save("relationship $μ.png", fig)
+end
+
+
+transform!(df, [:start, :mean_down] => ByRow((start, μ) -> rem2pi(start - μ, RoundNearest)) => :start)
 
 # fig = Figure()
 # ax = Axis(fig[1,1], aspect = DataAspect())
@@ -180,8 +191,6 @@ transform!(df, :start => ByRow(x -> sign(sin(x)) > 0) => :placed_from_left)
 
 # fig = (data(df) * mapping(:start => rad2deg =>  "Placed down (°)", :placed2down => rad2deg => "Danced (°)", layout = :individual_number => nonnumeric) * visual(Scatter; label = "data") + data(DataFrame(a = 360 .* (-2:2), b = -1)) * mapping(:a, :b) * visual(ABLines; color = :red, label = "y = -x")) |> draw(; axis = (; xticks = -180:180:180, yticks = -720:180:720, aspect = DataAspect(), width = 200))
 
-wrap90(x) = mod(x, -(π/2)..(π/2))
-scatter(wrap90.(df.start), df.placed2down)
 
 shuffle!(df)
 sort!(df, [:placed_from_left, :cw, :start])
@@ -209,9 +218,68 @@ resize_to_layout!(fig)
 
 save("centered to ideal down from ball.png", fig)
 
-df2 = combine(groupby(df, :individual_number), [:placed_from_left, :cw] => ((x1, x2) -> round(Int, 100count(x1 .≠ x2)/length(x1))) => :longest, [:placed_from_left, :cw] => ((x1, x2) -> round(Int, 100count(x1 .== x2)/length(x1))) => :shortest, :cw => (x -> round(Int, 100count(!, x)/length(x))) => :ccw, :cw => (x -> round(Int, 100count(x)/length(x))) => :cw, :placed2down => (x -> round(Int, 100count(x -> abs(x) < π, x)/length(x))) => :shortest_dance)
+# df2 = combine(groupby(df, :individual_number), [:placed_from_left, :cw] => ((x1, x2) -> round(Int, 100count(x1 .≠ x2)/length(x1))) => :longest, [:placed_from_left, :cw] => ((x1, x2) -> round(Int, 100count(x1 .== x2)/length(x1))) => :shortest, :cw => (x -> round(Int, 100count(!, x)/length(x))) => :ccw, :cw => (x -> round(Int, 100count(x)/length(x))) => :cw, :placed2down => (x -> round(Int, 100count(x -> abs(x) < π, x)/length(x))) => :shortest_dance)
+#
+# mean.(eachcol(df2))
 
-mean.(eachcol(df2))
+place2weight(x) = 1 - abs((abs(x) - π/2)/π/2)
+df2 = select(df, :individual_number, :start, :cw)
+# transform!(groupby(df2, :individual_number), groupindices => :id)
+
+# @assert all(≠(0), df2.side)
+# @assert all(x -> 0 ≤ x ≤ 1, df2.w)
+
+
+n = 30
+handedness = rand(n)
+shortest = 0.99
+nreps = 10
+df3 = DataFrame(start = rand(-π..π, nreps*n), individual_number = repeat(1:n, inner = nreps))
+function generate(start, individual_number)
+    w = place2weight(start)
+    s = sign(start)
+    p2 = (1 + s*(2shortest - 1))/2
+    z = handedness[individual_number] + w*p2
+    p = 1 / (1 + exp(-z))
+    d = Bernoulli(p)
+    rand(d)
+end
+transform!(df3, [:start, :individual_number] => ByRow(generate) => :cw)
+hist(df3.cw)
+
+using Turing
+
+@model function bmodel(individual_number, starts, cws)
+    handedness ~ filldist(Uniform(0, 1), maximum(individual_number))
+    p1 = handedness[individual_number]
+    shortest ~ Uniform(0, 1)
+    for i in eachindex(starts)
+        w = place2weight(starts[i])
+        s = sign(starts[i])
+        p2 = (1 + s*(2shortest - 1))/2
+        z = p1[i] + w*p2
+        cws[i] ~ BernoulliLogit(z)
+    end
+end
+
+model = bmodel(df2.individual_number, df2.start, df2.cw)
+chain = sample(model, NUTS(), MCMCThreads(), 100000, 4)
+
+# chain = sample(model, Gibbs(), 1000)
+
+describe(chain)
+
+fig = Figure()
+for (i, var_name) in enumerate(chain.name_map.parameters)
+    draw!(
+          fig[i, 1],
+          data(chain) *
+          mapping(var_name; color=:chain => nonnumeric) *
+          AlgebraOfGraphics.density() *
+          visual(fillalpha=0)
+          ; axis = (; width = 100, height = 100))
+end
+resize_to_layout!(fig)
 
 
 fjhsdkfhlsakhfs
