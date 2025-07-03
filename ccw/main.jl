@@ -5,6 +5,8 @@ using GLM
 using Random
 using Optim
 
+rm.(filter(==(".png") ∘ last ∘ splitext, readdir()))
+
 function dance(start, stop, cw, fullturns)
     if start < stop
         if cw 
@@ -141,13 +143,14 @@ function to_minimize(start, placed2down, μ)
     sum(r)
 end
 
-transform!(groupby(df, :individual_number), :exit => (θs -> angle(sum(exp, 1im*θs))) => :mean_exit, [:start, :placed2down] => ((s, p) -> angle(sum(exp, 1im*(s .+ p)))) => :mean_down, [:start, :placed2down] => ((start, placed2down) -> optimize(μ -> to_minimize(start, placed2down, μ), -pi, pi).minimizer) => :optimal)
+angular_mean(θs) = angle(sum(exp, 1im*θs))
+
+transform!(groupby(df, :individual_number), :exit => angular_mean => :mean_exit, [:start, :placed2down] => ((s, p) -> angular_mean(s .+ p)) => :mean_down, [:start, :placed2down] => ((start, placed2down) -> optimize(μ -> to_minimize(start, placed2down, μ), -pi, pi).minimizer) => :optimal)
 
 fig = data(df) * (mapping(:mean_exit => rad2deg => "Mean exit", :mean_down => rad2deg) * visual(Scatter; label = "Mean down") + mapping(:mean_exit => rad2deg => "Mean exit", :optimal => rad2deg) * visual(Scatter; color = :red, label = "Mean optimal") + pregrouped([0], [1]) * visual(ABLines; color = :gray, label = "y = x")) |> draw(; axis = (; xticks = [-180, 0, 180], xtickformat = "{:n}°", yticks = -180:180:180, ytickformat = "{:n}°", aspect = DataAspect(), width = 200, limits = ((-190, 190),(-190, 190))))
 resize_to_layout!(fig)
 
 save("means.png", fig)
-
 
 
 for μ in (:mean_exit, :mean_down, :optimal)
@@ -161,6 +164,67 @@ end
 
 
 transform!(df, [:start, :mean_down] => ByRow((start, μ) -> rem2pi(start - μ, RoundNearest)) => :start)
+
+transform!(df, :start => ByRow(x -> sign(x) > 0) => :placed_from_left)
+# transform!(df, [:placed_from_left, :cw] => ByRow((left, cw) -> string(left ? "left" : "right", " ", cw ? "cw" : "ccw")) => :quadrant)
+
+# df2 = copy(df)
+df2 = subset(df, :placed2down => ByRow(<(2pi) ∘ abs), :start => ByRow(x -> deg2rad(20) < abs(x) < deg2rad(160)))
+
+function fun(left, cw, start, placed2down)
+    # @assert length(unique(left)) == 1
+    # @assert length(unique(cw)) == 1
+    if left[1]
+        if cw[1]
+            p = 0
+        else
+            p = 2pi
+        end
+        tf = @. placed2down < -start + p
+    else
+        if cw[1]
+            p = -2pi
+        else
+            p = 0
+        end
+        tf = @. placed2down > -start + p
+    end
+    count(tf)/length(tf)
+end
+
+combine(groupby(df2, [:placed_from_left, :cw]), [:placed_from_left, :cw, :start, :placed2down] => fun => :proportion)
+
+
+
+# df2 = transform(df, [:start, :cw] => ByRow((s, c) -> string(s < 0 ? "right" : "left", " ", c ? "cw" : "ccw")) => :quadrant)
+# # subset!(df2, :placed2down => ByRow(<(2pi) ∘ abs), :start => ByRow(>(0.5) ∘ abs))
+# @. model(x, p) = -x + p[2]*exp(x*p[1] + p[3])
+# @. model(x, p) = -p[1]* x + p[2]
+# df3 = combine(groupby(df2, :quadrant), [:start, :placed2down] => ((x, y) -> Ref(coef(curve_fit(model, x, y, ones(2))))) => :coef)
+# transform!(df3, :quadrant => ByRow(q -> contains(q, "right") ? range(-pi, 0, 100) : range(0, pi, 100)) => :xl)
+# transform!(df3, [:xl, :coef] => ByRow(model) => :yl)
+# select!(df3, Not(:coef))
+# df4 = flatten(df3, [:xl, :yl])
+# xy = data(df2) * mapping(:start, :placed2down) * visual(Scatter)
+# line = data(df4) * mapping(:xl, :yl, group = :quadrant) * visual(Lines; color = :red)
+# draw(xy + line)
+
+
+xy = data(df) * mapping(:start => rad2deg => "Placed", :placed2down => rad2deg => "Danced") * visual(Scatter; alpha = 0.5, label = "data")
+abline = data(DataFrame(a = 360 .* (-2:2), b = -1, color = ["longest", "longer", "shortest", "longer", "longest"])) * mapping(:a, :b, color = :color => sorter("shortest", "longer", "longest") => "") * visual(ABLines; label = "y = -x")
+# vline = data(DataFrame(low = [-160, 20], high = [-20, 160])) * mapping(:low, :high) * visual(VSpan; color = (:gray, 0.2), label = "included")
+vline = data(DataFrame(geometry = [Rect(-160, -360, 140, 720), Rect(20, -360, 140, 720)])) * mapping(:geometry) * visual(Poly; color = (:gray, 0.2), label = "included")
+toplot = xy + abline + vline
+fig = draw(toplot; axis = (; xticks = [-180, 0, 180], xtickformat = "{:n}°", yticks = -720:180:720, ytickformat = "{:n}°", aspect = DataAspect(), width = 200))
+resize_to_layout!(fig)
+
+
+save("relationship.png", fig)
+
+# using LsqFit
+
+
+# lines!(xdata, model(xdata, coef(fit)))
 
 # fig = Figure()
 # ax = Axis(fig[1,1], aspect = DataAspect())
@@ -181,13 +245,12 @@ transform!(df, [:start, :mean_down] => ByRow((start, μ) -> rem2pi(start - μ, R
 # heatmap(df2.start, df2.placed2down, df2.nrow)
 
 
-transform!(df, [:start, :placed2down] => ByRow((x, y) -> findmin(i -> abs(y - (i*2π - x)), -2:2)) => [:r, :i])
+# transform!(df, [:start, :placed2down] => ByRow((x, y) -> findmin(i -> abs(y - (i*2π - x)), -2:2)) => [:r, :i])
+#
+# fig = (data(df) * mapping(:start => rad2deg =>  "Placed down (°)", :placed2down => rad2deg => "Danced (°)", layout = :individual_number => nonnumeric) * visual(Scatter; label = "data") + data(DataFrame(a = 360 .* (-2:2), b = -1, color = ["longest", "longer", "shortest", "longer", "longest"])) * mapping(:a, :b, color = :color => sorter("shortest", "longer", "longest")) * visual(ABLines; label = "y = -x")) |> draw(; axis = (; aspect = DataAspect(), xticks = -180:180:180, yticks = -720:180:720, height = 200))
+# resize_to_layout!(fig)
+# save("relationship2.png", fig)
 
-fig = (data(df) * mapping(:start => rad2deg =>  "Placed down (°)", :placed2down => rad2deg => "Danced (°)", layout = :individual_number => nonnumeric) * visual(Scatter; label = "data") + data(DataFrame(a = 360 .* (-2:2), b = -1, color = ["longest", "longer", "shortest", "longer", "longest"])) * mapping(:a, :b, color = :color => sorter("shortest", "longer", "longest")) * visual(ABLines; label = "y = -x")) |> draw(; axis = (; aspect = DataAspect(), xticks = -180:180:180, yticks = -720:180:720, height = 200))
-resize_to_layout!(fig)
-save("relationship2.png", fig)
-
-transform!(df, :start => ByRow(x -> sign(sin(x)) > 0) => :placed_from_left)
 
 # fig = (data(df) * mapping(:start => rad2deg =>  "Placed down (°)", :placed2down => rad2deg => "Danced (°)", layout = :individual_number => nonnumeric) * visual(Scatter; label = "data") + data(DataFrame(a = 360 .* (-2:2), b = -1)) * mapping(:a, :b) * visual(ABLines; color = :red, label = "y = -x")) |> draw(; axis = (; xticks = -180:180:180, yticks = -720:180:720, aspect = DataAspect(), width = 200))
 
@@ -216,7 +279,14 @@ for (i, (k, g)) in enumerate(pairs(groupby(df, :individual_number)))
 end
 resize_to_layout!(fig)
 
-save("centered to ideal down from ball.png", fig)
+save("centered to mean go down.png", fig)
+
+
+
+wejrhlwehrwkehrlwhrwlwjeh
+
+
+below is the bayesian stuff
 
 # df2 = combine(groupby(df, :individual_number), [:placed_from_left, :cw] => ((x1, x2) -> round(Int, 100count(x1 .≠ x2)/length(x1))) => :longest, [:placed_from_left, :cw] => ((x1, x2) -> round(Int, 100count(x1 .== x2)/length(x1))) => :shortest, :cw => (x -> round(Int, 100count(!, x)/length(x))) => :ccw, :cw => (x -> round(Int, 100count(x)/length(x))) => :cw, :placed2down => (x -> round(Int, 100count(x -> abs(x) < π, x)/length(x))) => :shortest_dance)
 #
@@ -250,6 +320,8 @@ hist(df3.cw)
 using Turing
 
 @model function bmodel(starts, cws)
+    # handedness ~ Beta(1, 1)
+    # shortest ~ Beta(1, 1)
     handedness ~ Uniform(0, 1)
     shortest ~ Uniform(0, 1)
     ratio ~ Beta(1, 1)
@@ -263,7 +335,7 @@ using Turing
 end
 
 model = bmodel(df2.start, df2.cw)
-chain = sample(model, NUTS(), MCMCThreads(), 1000000, 4)
+chain = sample(model, NUTS(), MCMCThreads(), 100000, 4)
 
 # chain = sample(model, Gibbs(), 1000)
 
@@ -277,9 +349,9 @@ for (i, var_name) in enumerate(chain.name_map.parameters)
           mapping(var_name; color=:chain => nonnumeric) *
           AlgebraOfGraphics.density() *
           visual(fillalpha=0)
-          ; axis = (; width = 200, height = 200, limits = ((0, 1), nothing)))
+          ; axis = (; limits = ((0, 1), nothing)))
 end
-resize_to_layout!(fig)
+# resize_to_layout!(fig)
 
 
 
@@ -287,17 +359,21 @@ resize_to_layout!(fig)
     handedness ~ filldist(Uniform(0, 1), maximum(individual_number))
     p1 = handedness[individual_number]
     shortest ~ Uniform(0, 1)
+    ratio ~ filldist(Beta(1, 1), maximum(individual_number))
+    r = ratio[individual_number]
+    # ratio ~ Beta(1, 1)
     for i in eachindex(starts)
         w = place2weight(starts[i])
         s = sign(starts[i])
         p2 = (1 + s*(2shortest - 1))/2
-        z = p1[i] + w*p2
+        # z = ratio*p1[i] + (1 - ratio)*w*p2
+        z = r[i]*p1[i] + (1 - r[i])*w*p2
         cws[i] ~ BernoulliLogit(z)
     end
 end
 
 model = bmodel(df2.individual_number, df2.start, df2.cw)
-chain = sample(model, NUTS(), MCMCThreads(), 100000, 4)
+chain = sample(model, NUTS(), MCMCThreads(), 10000, 4)
 
 # chain = sample(model, Gibbs(), 1000)
 
