@@ -249,6 +249,40 @@ hist(df3.cw)
 
 using Turing
 
+@model function bmodel(starts, cws)
+    handedness ~ Uniform(0, 1)
+    shortest ~ Uniform(0, 1)
+    ratio ~ Beta(1, 1)
+    for i in eachindex(starts)
+        w = place2weight(starts[i])
+        s = sign(starts[i])
+        p2 = (1 + s*(2shortest - 1))/2
+        z = ratio*handedness + (1 - ratio)*w*p2
+        cws[i] ~ BernoulliLogit(z)
+    end
+end
+
+model = bmodel(df2.start, df2.cw)
+chain = sample(model, NUTS(), MCMCThreads(), 1000000, 4)
+
+# chain = sample(model, Gibbs(), 1000)
+
+describe(chain)
+
+fig = Figure()
+for (i, var_name) in enumerate(chain.name_map.parameters)
+    draw!(
+          fig[i, 1],
+          data(chain) *
+          mapping(var_name; color=:chain => nonnumeric) *
+          AlgebraOfGraphics.density() *
+          visual(fillalpha=0)
+          ; axis = (; width = 200, height = 200, limits = ((0, 1), nothing)))
+end
+resize_to_layout!(fig)
+
+
+
 @model function bmodel(individual_number, starts, cws)
     handedness ~ filldist(Uniform(0, 1), maximum(individual_number))
     p1 = handedness[individual_number]
