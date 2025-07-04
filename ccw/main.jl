@@ -1,7 +1,7 @@
 using Statistics
 using CSV, DataFrames
 using GLMakie, AlgebraOfGraphics
-using GLM
+using MixedModels
 using Random
 using Optim
 
@@ -189,11 +189,44 @@ function fun(left, cw, start, placed2down)
         end
         tf = @. placed2down > -start + p
     end
-    count(tf)/length(tf)
+    count(tf)
 end
 
-combine(groupby(df2, [:placed_from_left, :cw]), [:placed_from_left, :cw, :start, :placed2down] => fun => :proportion)
+tbl = combine(groupby(df2, [:placed_from_left, :cw]), [:placed_from_left, :cw, :start, :placed2down] => fun => :shoot, nrow)
 
+function fun(left, cw, start, placed2down)
+    if left[1]
+        if cw[1]
+            p = 0
+        else
+            p = 2pi
+        end
+        residuals = @. -start + p - placed2down 
+    else
+        if cw[1]
+            p = -2pi
+        else
+            p = 0
+        end
+        residuals = @. placed2down - (-start + p)
+    end
+    residuals
+end
+
+df3 = combine(groupby(df2, [:placed_from_left, :cw]), [:placed_from_left, :cw, :start, :placed2down] => fun => :residuals, :start, :individual_number)
+
+data(df3) * mapping(:start, :residuals, col = :placed_from_left, row = :cw) * visual(Scatter) |> draw()
+
+data(df3) * mapping(:residuals, col = :placed_from_left, row = :cw) * visual(Hist) |> draw()
+
+data(df3) * mapping(:residuals) * visual(Hist) |> draw()
+
+lmod = lmm(@formula(residuals ~ 1 + start*placed_from_left*cw + (1|individual_number)), df3)
+
+lmod = lmm(@formula(residuals ~ 1 + start + (1|individual_number)), df3)
+
+
+# AlgebraOfGraphics.density(bandwidth=0.5) |> draw()
 
 
 # df2 = transform(df, [:start, :cw] => ByRow((s, c) -> string(s < 0 ? "right" : "left", " ", c ? "cw" : "ccw")) => :quadrant)
