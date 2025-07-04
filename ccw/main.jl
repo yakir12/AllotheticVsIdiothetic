@@ -1,7 +1,7 @@
 using Statistics
 using CSV, DataFrames
 using GLMakie, AlgebraOfGraphics
-using MixedModels
+# using MixedModels, GLM
 using Random
 using Optim
 
@@ -194,36 +194,89 @@ end
 
 tbl = combine(groupby(df2, [:placed_from_left, :cw]), [:placed_from_left, :cw, :start, :placed2down] => fun => :shoot, nrow)
 
-function fun(left, cw, start, placed2down)
-    if left[1]
-        if cw[1]
-            p = 0
-        else
-            p = 2pi
-        end
-        residuals = @. -start + p - placed2down 
-    else
-        if cw[1]
-            p = -2pi
-        else
-            p = 0
-        end
-        residuals = @. placed2down - (-start + p)
-    end
-    residuals
+function fun(overshoot, placed_from_left, start, placed2down)
+    intercept = overshoot ? 0 : placed_from_left ? 2pi : -2pi
+    ŷ = intercept - start
+    Δ = ŷ - placed2down 
+    placed_from_left ? Δ : -Δ
 end
 
-df3 = combine(groupby(df2, [:placed_from_left, :cw]), [:placed_from_left, :cw, :start, :placed2down] => fun => :residuals, :start, :individual_number)
+transform!(df2, [:placed_from_left, :cw] => ByRow(==) => :overshoot)
 
-data(df3) * mapping(:start, :residuals, col = :placed_from_left, row = :cw) * visual(Scatter) |> draw()
+transform!(df2, [:overshoot, :placed_from_left, :start, :placed2down] => ByRow(fun) => :residuals, :start => (s -> abs.(s)) => :x)
 
-data(df3) * mapping(:residuals, col = :placed_from_left, row = :cw) * visual(Hist) |> draw()
+data(df2) * mapping(:overshoot, :residuals, color = :overshoot) * visual(BoxPlot) |> draw()
 
-data(df3) * mapping(:residuals) * visual(Hist) |> draw()
+rad2deg(mean(df2.residuals))
 
-lmod = lmm(@formula(residuals ~ 1 + start*placed_from_left*cw + (1|individual_number)), df3)
+# lmmod = lmm(@formula(residuals ~ 1 + overshoot + (1|individual_number)), df2)
+#
+# lmmod = lm(@formula(residuals ~ 1 + overshoot), df2)
+#
+# data(df3) * mapping(:x, :residuals) * visual(Scatter) + pregrouped([0], [1]) * visual(ABLines) + pregrouped([[c] for c in coef(lmod)]...) * visual(ABLines) |> draw()#; axis = (; aspect = DataAspect()))
 
-lmod = lmm(@formula(residuals ~ 1 + start + (1|individual_number)), df3)
+# using Turing
+#
+#
+# @model function bmodel(g, x, y)
+#     σ ~ InverseGamma(2, 2)
+#     slope ~ Normal(1, 3)
+#     intercept ~ filldist(Normal(0, 3), length(unique(g)))
+#     b = intercept[g]
+#     for i in eachindex(x)
+#         μ = b[i] + slope*x[i]
+#         y[i] ~ Normal(μ, σ)
+#     end
+# end
+#
+# model = bmodel(df3.individual_number, df3.x, df3.residuals)
+# chain = sample(model, NUTS(), MCMCThreads(), 100000, 4)
+#
+# # chain = sample(model, Gibbs(), 1000)
+#
+# describe(chain)
+#
+# fig = Figure()
+# for (i, var_name) in enumerate(chain.name_map.parameters)
+#     draw!(
+#           fig[i, 1],
+#           data(chain) *
+#           mapping(var_name; color=:chain => nonnumeric) *
+#           AlgebraOfGraphics.density() *
+#           visual(fillalpha=0); axis = (; height = 200))
+# end
+# resize_to_layout!(fig)
+#
+# @model function bmodel(g, x, y)
+#     σ ~ InverseGamma(2, 2)
+#     intercept ~ filldist(Normal(0, 3), length(unique(g)))
+#     b = intercept[g]
+#     for i in eachindex(x)
+#         μ = b[i] + x[i]
+#         y[i] ~ Normal(μ, σ)
+#     end
+# end
+#
+# model = bmodel(df3.individual_number, df3.x, df3.residuals)
+# chain = sample(model, NUTS(), MCMCThreads(), 100000, 4)
+#
+# # chain = sample(model, Gibbs(), 1000)
+#
+# describe(chain)
+#
+# fig = Figure()
+# for (i, var_name) in enumerate(chain.name_map.parameters)
+#     draw!(
+#           fig[i, 1],
+#           data(chain) *
+#           mapping(var_name; color=:chain => nonnumeric) *
+#           AlgebraOfGraphics.density() *
+#           visual(fillalpha=0); axis = (; height = 200))
+# end
+# resize_to_layout!(fig)
+
+
+
 
 
 # AlgebraOfGraphics.density(bandwidth=0.5) |> draw()
@@ -243,12 +296,18 @@ lmod = lmm(@formula(residuals ~ 1 + start + (1|individual_number)), df3)
 # draw(xy + line)
 
 
-xy = data(df) * mapping(:start => rad2deg => "Placed", :placed2down => rad2deg => "Danced") * visual(Scatter; alpha = 0.5, label = "data")
-abline = data(DataFrame(a = 360 .* (-2:2), b = -1, color = ["longest", "longer", "shortest", "longer", "longest"])) * mapping(:a, :b, color = :color => sorter("shortest", "longer", "longest") => "") * visual(ABLines; label = "y = -x")
-# vline = data(DataFrame(low = [-160, 20], high = [-20, 160])) * mapping(:low, :high) * visual(VSpan; color = (:gray, 0.2), label = "included")
+fig = Figure()
+subgl_left = GridLayout()
+subgl_right = GridLayout()
+fig.layout[1, 1] = subgl_left
+fig.layout[1, 2] = subgl_right
+xy = data(df) * mapping(:start => rad2deg => "Placed", :placed2down => rad2deg => "Danced") * visual(Scatter; strokewidth = 1, strokecolor = :white, markersize = 6, alpha = 0.5, label = "data", legend = (; alpha = 1))
+abline = data(DataFrame(a = 360 .* (-2:2), b = -1, color = ["extra loop", "longer", "shorter", "longer", "extra loop"])) * mapping(:a, :b, color = :color => sorter("shorter", "longer", "extra loop") => "") * visual(ABLines)
 vline = data(DataFrame(geometry = [Rect(-160, -360, 140, 720), Rect(20, -360, 140, 720)])) * mapping(:geometry) * visual(Poly; color = (:gray, 0.2), label = "included")
-toplot = xy + abline + vline
-fig = draw(toplot; axis = (; xticks = [-180, 0, 180], xtickformat = "{:n}°", yticks = -720:180:720, ytickformat = "{:n}°", aspect = DataAspect(), width = 200))
+toplot = vline + abline + xy
+g = draw!(subgl_left[1,1], toplot; axis = (; xticks = [-180, 0, 180], xtickformat = "{:n}°", yticks = -720:180:720, ytickformat = "{:n}°", aspect = DataAspect(), width = 200))
+legend!(subgl_right[1,1], g)
+draw!(subgl_right[2,1], data(df2) * mapping(:residuals => rad2deg) * visual(Hist); axis = (; ylabel = "#", xticks = [25, 180], xtickformat = "{:n}°", width = 200))
 resize_to_layout!(fig)
 
 
