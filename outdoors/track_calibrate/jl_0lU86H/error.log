@@ -1,1 +1,0 @@
-ErrorException("The extrinsic image in video /home/yakir/mnt/dacke_lab_data/Data/Elin/Project_AllotheticVsIdiothetic_outdoors/./20230112_mirror_dance10_ID30_dance01_ID31.MTS at timestamp 411.289, is unusable (see files in jl_0lU86H)! Please choose a different time point for the extrinsic image. Or try perhaps different `n_corners`, right now it's (4, 6).")
