@@ -67,7 +67,7 @@ individual_number;placed from;placed from angle (degrees);rotation 1 direction;f
 7;ccw;135;cw;0;40;cw;10;-95;95;265;300
 7;cw;55;ccw;0;10;ccw;5;-45;45;45;300
 7;ccw;200;cw;0;20;cw;20;180;180;180;300
-7;cw;25;no;0;25;no;10;0;0;0;300
+7;cw;25;ccw;0;20;ccw;10;-5;5;5;300
 7;ccw;210;ccw;0;50;ccw;25;-160;160;160;300
 8;ccw;270;ccw;0;220;ccw;160;-50;50;50;10
 8;cw;100;ccw;0;180;ccw;175;80;80;280;10
