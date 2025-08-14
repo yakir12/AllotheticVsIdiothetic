@@ -173,3 +173,28 @@ save("inidividual relationship $μ.png", fig)
 # mean_exit, 25, 54
 # mean_down, 26, 53
 # optimal, 27, 57
+
+shuffle!(df2)
+sort!(df2, [:placed_from_left, :cw, :start])
+
+fig = Figure()
+for (i, (k, g)) in enumerate(pairs(groupby(df2, :individual_number)))
+    ij = CartesianIndices((5, 6))[i]
+    ax = Axis(fig[Tuple(ij)...], aspect = DataAspect(), height = 200, width = 200)
+    for (j, row) in enumerate(eachrow(g))
+        radius = j + 1
+        poly!(ax, Makie.GeometryBasics.Polygon(Circle(zero(Point2f), radius+0.5), [Circle(zero(Point2f), radius-0.5)]), color = row.placed_from_left ? :blue : :green, alpha = 0.25)
+        color = (; color = row.cw ? :blue : :green)
+        ts = row.start .+ range(0, row.total_dance, length = 100)
+        lines!(ax, radius*Point2f.(reverse.(sincos.(ts .+ π/2))); color...)
+        α = row.start + row.total_dance
+        α += row.cw ? -π/2 : π/2
+        scatter!(ax, radius*Point2f(reverse(sincos(row.start + π/2))); color..., marker = '|', markersize=10, rotation = row.start + pi/2 + π/2)
+        scatter!(ax, radius*Point2f(reverse(sincos(row.start + row.total_dance + π/2))); color..., marker = :utriangle, markersize=10, rotation=α)
+    end
+    text!(ax, 0, 0; text = string(k.individual_number), align = (:center, :center))
+    hidedecorations!(ax)
+    hidespines!(ax)
+end
+resize_to_layout!(fig)
+save("circles.pdf", fig)
