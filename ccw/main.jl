@@ -120,6 +120,8 @@ for μ in (:mean_exit, :mean_down, :optimal)
     transform!(df3, [:placed_from_left, :cw] => ByRow(==) => :overshoot)
     transform!(df3, [:overshoot, :placed_from_left, :start, :total_dance] => ByRow(get_abs_residuals) => :residuals, :start => (s -> abs.(s)) => :x)
 
+    data(df3) * mapping(:start => abs ∘ rad2deg, :residuals => rad2deg, row = :overshoot => renamer(true => "overshut", false => "undershut"), col = :placed_from_left => renamer(true => "placed from left", false => "placed from right")) * (linear() + visual(Scatter)) |> draw() |> save("scatter $μ.png")
+
     fig = Figure(size = (12cm, 10cm), fontsize = 8pt, fonts = (; regular = "Helvetica"))
     subgl_left = GridLayout()
     subgl_right = GridLayout()
@@ -138,9 +140,9 @@ for μ in (:mean_exit, :mean_down, :optimal)
     dance_number = data(dforg) * (mapping(:n => "Dance number", "total absolute degrees of rotation" => "Total absolute rotation") * visual(BoxPlot) + mapping(:n => "Dance number", "total absolute degrees of rotation" => "Total absolute rotation", group = :individual_number => nonnumeric) * visual(Lines; alpha = 0.1, linewidth = 1))
     draw!(subgl_right[3,1], dance_number; axis = (; xticksize = 3, yticksize = 3, titlesize = 8pt, titlefont = :regular, xlabelsize = 8pt, ylabelsize = 8pt, xticklabelsize = 6pt, yticklabelsize = 6pt, yticks = 0:360:1000, ytickformat = "{:n}°"))
 
-    Label(subgl_left[1, 1, TopLeft()], "A", fontsize = 12, font = "Arial bold", padding = (0, 5, 5, 0), halign = :right)
-    Label(subgl_right[2, 1, TopLeft()], "B", fontsize = 12, font = "Arial bold", padding = (0, 5, 5, 0), halign = :right)
-    Label(subgl_right[3, 1, TopLeft()], "C", fontsize = 12, font = "Arial bold", padding = (0, 5, 5, 0), halign = :right)
+    Label(subgl_left[1, 1,  TopLeft()], "A", fontsize = 12pt, padding = (0, 5, 5, 0), halign = :right)
+    Label(subgl_right[2, 1, TopLeft()], "B", fontsize = 12pt, padding = (0, 5, 5, 0), halign = :right)
+    Label(subgl_right[3, 1, TopLeft()], "C", fontsize = 12pt, padding = (0, 5, 5, 0), halign = :right)
 
     resize_to_layout!(fig)
     save("relationship $μ.pdf", fig)
