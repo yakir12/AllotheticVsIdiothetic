@@ -157,9 +157,15 @@ save("direction changes.png", fig)
 
 df2 = combine(groupby(df, [:elevation, :individual]), r"full_lap" => ((xs...) -> Ref(only.(xs))) => [:one, :two, :three])
 df3 = @rsubset df2 !iszero(coalesce(:one, 0)) || !iszero(coalesce(:two, 0)) || !iszero(coalesce(:three, 0))
+
 @show df3
+
 @rtransform! df2 :lap = (coalesce(:one, 0) + coalesce(:two, 0) + coalesce(:three, 0)) > 0
+
 @select! df2 Not(:individual, :one, :two, :three)
+
+CSV.write("binomial data.csv", df2)
+
 sort!(df2, [:elevation, order(:lap, rev = true)])
 
 df3 = combine(groupby(df2, :elevation), nrow => :n, :lap => count => :lap)
@@ -194,7 +200,7 @@ save("full laps.png", fig)
 
 
 
-df2 = combine(groupby(df, [:elevation, :individual]), Cols(r"full_lap", r"stop_") => ((f1, f2, f3, s1, s2, s3) -> Ref((; one = only(xs[1]), two = only(xs[2])))) => [:one, :two])
+# df2 = combine(groupby(df, [:elevation, :individual]), Cols(r"full_lap", r"stop_") => ((f1, f2, f3, s1, s2, s3) -> Ref((; one = only(xs[1]), two = only(xs[2])))) => [:one, :two])
 
 df2 = transform(df, Cols(r"full_lap") .=> ByRow(x -> coalesce(x, 0)), renamecols = false)
 df2 = combine(groupby(df2, [:elevation, :individual]), r"full_lap" => ((xs...) -> Ref((; one = only(xs[1]), two = only(xs[2])))) => [:one, :two])
