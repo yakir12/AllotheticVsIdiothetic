@@ -102,9 +102,9 @@ resize_to_layout!(fig1)
 save("means.pdf", fig1)
 
 
-function get_abs_residuals(overshoot, placed_from_left, start, total_dance)
+function get_abs_residuals(shortdirection, placed_from_left, start, total_dance)
     n = abs(total_dance) < 2π ? 1 : 2
-    intercept = overshoot ? 0 : placed_from_left ? n*2π : -n*2π
+    intercept = shortdirection ? 0 : placed_from_left ? n*2π : -n*2π
     ŷ = intercept - start
     Δ = ŷ - total_dance 
     placed_from_left ? Δ : -Δ
@@ -117,10 +117,13 @@ for μ in (:mean_exit, :mean_down, :optimal)
     transform!(df2, :start => ByRow(x -> sign(x) > 0) => :placed_from_left)
     df3 = subset(df2, :start => ByRow(x -> deg2rad(20) < abs(x) < deg2rad(160)))
     # df3 = subset(df2, :total_dance => ByRow(<(2pi) ∘ abs), :start => ByRow(x -> deg2rad(20) < abs(x) < deg2rad(160)))
-    transform!(df3, [:placed_from_left, :cw] => ByRow(==) => :overshoot)
-    transform!(df3, [:overshoot, :placed_from_left, :start, :total_dance] => ByRow(get_abs_residuals) => :residuals, :start => (s -> abs.(s)) => :x)
+    transform!(df3, [:placed_from_left, :cw] => ByRow(==) => :shortdirection)
+    transform!(df3, [:shortdirection, :placed_from_left, :start, :total_dance] => ByRow(get_abs_residuals) => :residuals, :start => (s -> abs.(s)) => :x)
 
-    data(df3) * mapping(:start => abs ∘ rad2deg, :residuals => rad2deg, row = :overshoot => renamer(true => "overshut", false => "undershut"), col = :placed_from_left => renamer(true => "placed from left", false => "placed from right")) * (linear() + visual(Scatter)) |> draw() |> save("scatter $μ.png")
+    data(df3) * mapping(:start => abs ∘ rad2deg, :residuals => rad2deg, row = :shortdirection => renamer(true => "short direction", false => "long direction")) * (linear() + visual(Scatter)) |> draw() |> save("scatter $μ.png")
+    @show combine(groupby(df3, :shortdirection), :residuals => rad2deg ∘ mean)
+
+    # data(df3) * mapping(:shortdirection => renamer(true => "short direction", false => "long direction"), :residuals => rad2deg) * visual(Violin; datalimits = extrema) |> draw() |> save("violin $μ.png")
 
     fig = Figure(size = (12cm, 10cm), fontsize = 8pt, fonts = (; regular = "Helvetica"))
     subgl_left = GridLayout()
