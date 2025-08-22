@@ -103,11 +103,14 @@ save("means.pdf", fig1)
 
 
 function get_abs_residuals(shortdirection, placed_from_left, start, total_dance)
-    n = abs(total_dance) < 2π ? 1 : 2
-    intercept = shortdirection ? 0 : placed_from_left ? n*2π : -n*2π
-    ŷ = intercept - start
-    Δ = ŷ - total_dance 
-    placed_from_left ? Δ : -Δ
+    intercepts = -720:360:720
+    Δs = abs.(abs.(intercepts .- start) .- abs(total_dance))
+    return minimum(Δs)
+    # n = abs(total_dance ÷ 2π)
+    # intercept = shortdirection ? 0 : placed_from_left ? n*2π : -n*2π
+    # ŷ = intercept - start
+    # Δ = ŷ - total_dance 
+    # placed_from_left ? Δ : -Δ
 end
 
 example_individual = 24
