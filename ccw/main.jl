@@ -103,9 +103,11 @@ save("means.pdf", fig1)
 
 
 function get_abs_residuals(shortdirection, placed_from_left, start, total_dance)
-    intercepts = -720:360:720
-    Δs = abs.(abs.(intercepts .- start) .- abs(total_dance))
-    return minimum(Δs)
+    Δ = asin(sin(total_dance + start))
+    placed_from_left ? Δ : -Δ
+    # intercepts = -720:360:720
+    # Δs = abs.(abs.(intercepts .- start) .- abs(total_dance))
+    # return minimum(Δs)
     # n = abs(total_dance ÷ 2π)
     # intercept = shortdirection ? 0 : placed_from_left ? n*2π : -n*2π
     # ŷ = intercept - start
@@ -124,6 +126,7 @@ for μ in (:mean_exit, :mean_down, :optimal)
     transform!(df3, [:shortdirection, :placed_from_left, :start, :total_dance] => ByRow(get_abs_residuals) => :residuals, :start => (s -> abs.(s)) => :x)
 
     data(df3) * mapping(:start => abs ∘ rad2deg, :residuals => rad2deg, row = :shortdirection => renamer(true => "short direction", false => "long direction")) * (linear() + visual(Scatter)) |> draw() |> save("scatter $μ.png")
+    data(df3) * mapping(:residuals => rad2deg, color = :shortdirection => renamer(true => "short direction", false => "long direction")) * histogram(Stairs; bins = 10) |> draw() |> save("hist $μ.png")
     @show combine(groupby(df3, :shortdirection), :residuals => rad2deg ∘ mean)
 
     # data(df3) * mapping(:shortdirection => renamer(true => "short direction", false => "long direction"), :residuals => rad2deg) * visual(Violin; datalimits = extrema) |> draw() |> save("violin $μ.png")
@@ -142,7 +145,7 @@ for μ in (:mean_exit, :mean_down, :optimal)
     g = draw!(subgl_left[1,1], toplot; axis = (; xticksize = 3, yticksize = 3, titlesize = 8pt, titlefont = :regular, xlabelsize = 8pt, ylabelsize = 8pt, xticklabelsize = 6pt, yticklabelsize = 6pt, xlabel = "Initial body orientation", xticks = [-180, 0, 180], xtickformat = "{:n}°", yticks = -720:180:720, ytickformat = "{:n}°", aspect = DataAspect()))
 
     legend!(subgl_right[1,1], g; framevisible = false)
-    draw!(subgl_right[2,1], data(df3) * mapping(:residuals => rad2deg => "Residuals") * visual(Hist; bins = 25); axis = (; xticksize = 3, yticksize = 3, titlesize = 8pt, titlefont = :regular, xlabelsize = 8pt, ylabelsize = 8pt, xticklabelsize = 6pt, yticklabelsize = 6pt, ylabel = "#", xticks = 0:180:1000, xtickformat = "{:n}°"))
+    draw!(subgl_right[2,1], data(df3) * mapping(:residuals => rad2deg => "Residuals") * visual(Hist; bins = 15); axis = (; xticksize = 3, yticksize = 3, titlesize = 8pt, titlefont = :regular, xlabelsize = 8pt, ylabelsize = 8pt, xticklabelsize = 6pt, yticklabelsize = 6pt, ylabel = "#", xtickformat = "{:n}°"))
     dance_number = data(dforg) * (mapping(:n => "Dance number", "total absolute degrees of rotation" => "Total absolute rotation") * visual(BoxPlot) + mapping(:n => "Dance number", "total absolute degrees of rotation" => "Total absolute rotation", group = :individual_number => nonnumeric) * visual(Lines; alpha = 0.1, linewidth = 1))
     draw!(subgl_right[3,1], dance_number; axis = (; xticksize = 3, yticksize = 3, titlesize = 8pt, titlefont = :regular, xlabelsize = 8pt, ylabelsize = 8pt, xticklabelsize = 6pt, yticklabelsize = 6pt, yticks = 0:360:1000, ytickformat = "{:n}°"))
 
