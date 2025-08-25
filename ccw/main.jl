@@ -102,12 +102,14 @@ resize_to_layout!(fig1)
 save("means.pdf", fig1)
 
 
-function get_abs_residuals(shortdirection, placed_from_left, start, total_dance)
-    Δ = asin(sin(total_dance + start))
-    placed_from_left ? Δ : -Δ
-    # intercepts = -720:360:720
-    # Δs = abs.(abs.(intercepts .- start) .- abs(total_dance))
-    # return minimum(Δs)
+function get_abs_residuals(shortdirection, placed_from_left, start, total_dance, cw)
+    # Δ = asin(sin(total_dance + start))
+    # placed_from_left ? Δ : -Δ
+    intercepts = -720:360:720
+    Δs = deg2rad.(intercepts) .- start .- total_dance
+    _, i = findmin(abs, Δs)
+    Δ = Δs[i]
+    return (intercept = intercepts[i], residual = cw ? Δ : -Δ)
     # n = abs(total_dance ÷ 2π)
     # intercept = shortdirection ? 0 : placed_from_left ? n*2π : -n*2π
     # ŷ = intercept - start
@@ -120,16 +122,17 @@ example_individual = 24
 for μ in (:mean_exit, :mean_down, :optimal)
     df2 = transform(df, [:start, μ] => ByRow((start, μ) -> rem2pi(start - μ, RoundNearest)) => :start)
     transform!(df2, :start => ByRow(x -> sign(x) > 0) => :placed_from_left)
-    df3 = subset(df2, :start => ByRow(x -> deg2rad(20) < abs(x) < deg2rad(160)))
+    df3 = df2#subset(df2, :start => ByRow(x -> deg2rad(20) < abs(x) < deg2rad(160)))
     # df3 = subset(df2, :total_dance => ByRow(<(2pi) ∘ abs), :start => ByRow(x -> deg2rad(20) < abs(x) < deg2rad(160)))
     transform!(df3, [:placed_from_left, :cw] => ByRow(==) => :shortdirection)
-    transform!(df3, [:shortdirection, :placed_from_left, :start, :total_dance] => ByRow(get_abs_residuals) => :residuals, :start => (s -> abs.(s)) => :x)
+    transform!(df3, [:shortdirection, :placed_from_left, :start, :total_dance, :cw] => ByRow(get_abs_residuals) => [:intercept, :residual], :start => (s -> abs.(s)) => :x)
 
-    data(df3) * mapping(:start => abs ∘ rad2deg, :residuals => rad2deg, row = :shortdirection => renamer(true => "short direction", false => "long direction")) * (linear() + visual(Scatter)) |> draw() |> save("scatter $μ.png")
-    data(df3) * mapping(:residuals => rad2deg, color = :shortdirection => renamer(true => "short direction", false => "long direction")) * histogram(Stairs; bins = 10) |> draw() |> save("hist $μ.png")
-    @show combine(groupby(df3, :shortdirection), :residuals => rad2deg ∘ mean)
+    (data(combine(groupby(df3, :shortdirection), :residual => mean => :μ)) * mapping(:μ => rad2deg => "Residuals (°)", col = :shortdirection => renamer(true => "short direction", false => "long direction")) * visual(HLines)) + (data(df3) * mapping(:start => rad2deg ∘ abs => "Initial body orientation (°)", :residual => rad2deg => "Residuals (°)", col = :shortdirection => renamer(true => "short direction", false => "long direction"), color = :total_dance => nonnumeric ∘ (x -> round(Int, abs(x)÷2π)) => "Additional lap") * visual(Scatter)) |> draw(axis = (aspect = DataAspect(), xticks = 0:30:180, yticks = -180:30:180, limits = ((0, 180), (-180, 180)))) |> save("scatter $μ.png")
+    # data(df3) * mapping(:start => abs ∘ rad2deg, :residual => rad2deg, row = :shortdirection => renamer(true => "short direction", false => "long direction")) * (linear() + visual(Scatter)) |> draw() |> save("scatter $μ.png")
+    data(df3) * mapping(:residual => rad2deg, color = :shortdirection => renamer(true => "short direction", false => "long direction")) * histogram(Stairs; bins = 10) |> draw() |> save("hist $μ.png")
+    @show combine(groupby(df3, :shortdirection), :residual => rad2deg ∘ mean)
 
-    # data(df3) * mapping(:shortdirection => renamer(true => "short direction", false => "long direction"), :residuals => rad2deg) * visual(Violin; datalimits = extrema) |> draw() |> save("violin $μ.png")
+    # data(df3) * mapping(:shortdirection => renamer(true => "short direction", false => "long direction"), :residual => rad2deg) * visual(Violin; datalimits = extrema) |> draw() |> save("violin $μ.png")
 
     fig = Figure(size = (12cm, 10cm), fontsize = 8pt, fonts = (; regular = "Helvetica"))
     subgl_left = GridLayout()
@@ -145,7 +148,7 @@ for μ in (:mean_exit, :mean_down, :optimal)
     g = draw!(subgl_left[1,1], toplot; axis = (; xticksize = 3, yticksize = 3, titlesize = 8pt, titlefont = :regular, xlabelsize = 8pt, ylabelsize = 8pt, xticklabelsize = 6pt, yticklabelsize = 6pt, xlabel = "Initial body orientation", xticks = [-180, 0, 180], xtickformat = "{:n}°", yticks = -720:180:720, ytickformat = "{:n}°", aspect = DataAspect()))
 
     legend!(subgl_right[1,1], g; framevisible = false)
-    draw!(subgl_right[2,1], data(df3) * mapping(:residuals => rad2deg => "Residuals") * visual(Hist; bins = 15); axis = (; xticksize = 3, yticksize = 3, titlesize = 8pt, titlefont = :regular, xlabelsize = 8pt, ylabelsize = 8pt, xticklabelsize = 6pt, yticklabelsize = 6pt, ylabel = "#", xtickformat = "{:n}°"))
+    draw!(subgl_right[2,1], data(df3) * mapping(:residual => rad2deg => "Residuals") * visual(Hist; bins = 15); axis = (; xticksize = 3, yticksize = 3, titlesize = 8pt, titlefont = :regular, xlabelsize = 8pt, ylabelsize = 8pt, xticklabelsize = 6pt, yticklabelsize = 6pt, ylabel = "#", xtickformat = "{:n}°"))
     dance_number = data(dforg) * (mapping(:n => "Dance number", "total absolute degrees of rotation" => "Total absolute rotation") * visual(BoxPlot) + mapping(:n => "Dance number", "total absolute degrees of rotation" => "Total absolute rotation", group = :individual_number => nonnumeric) * visual(Lines; alpha = 0.1, linewidth = 1))
     draw!(subgl_right[3,1], dance_number; axis = (; xticksize = 3, yticksize = 3, titlesize = 8pt, titlefont = :regular, xlabelsize = 8pt, ylabelsize = 8pt, xticklabelsize = 6pt, yticklabelsize = 6pt, yticks = 0:360:1000, ytickformat = "{:n}°"))
 
@@ -156,7 +159,7 @@ for μ in (:mean_exit, :mean_down, :optimal)
     resize_to_layout!(fig)
     save("relationship $μ.pdf", fig)
     save("relationship $μ.png", fig)
-    resid = rad2deg.(df3.residuals)
+    resid = rad2deg.(df3.residual)
     @show μ, round(Int, mean(resid)), round(Int, std(resid))
 end
 
@@ -169,7 +172,7 @@ transform!(df2, :start => ByRow(x -> sign(x) > 0) => :placed_from_left)
 df3 = subset(df2, :start => ByRow(x -> deg2rad(20) < abs(x) < deg2rad(160)))
 # df3 = subset(df2, :total_dance => ByRow(<(2pi) ∘ abs), :start => ByRow(x -> deg2rad(20) < abs(x) < deg2rad(160)))
 transform!(df3, [:placed_from_left, :cw] => ByRow(==) => :overshoot)
-transform!(df3, [:overshoot, :placed_from_left, :start, :total_dance] => ByRow(get_abs_residuals) => :residuals, :start => (s -> abs.(s)) => :x)
+transform!(df3, [:overshoot, :placed_from_left, :start, :total_dance] => ByRow(get_abs_residuals) => :residual, :start => (s -> abs.(s)) => :x)
 
 fig = Figure(size = (8cm, 18cm), fontsize = 12pt, fonts = (; regular = "Helvetica"))
 xy = data(subset(df2, :individual_number => ByRow(≠(example_individual)))) * mapping(:start => rad2deg => "Initial body orientation", :total_dance => rad2deg => "Total rotation", layout = :individual_number => nonnumeric) * visual(Scatter; strokewidth = 1, strokecolor = :white, markersize = 6, alpha = 0.5, label = "data", legend = (; alpha = 1))
