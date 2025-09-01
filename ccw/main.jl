@@ -42,11 +42,10 @@ end
 
 angular_mean(θs) = angle(sum(exp, 1im*θs))
 
-function get_min_residual(placed, dance)
-    intercepts = -720:360:720
-    Δs = deg2rad.(intercepts) .- placed .- dance
-    _, i = findmin(abs, Δs)
-    Δs[i]
+function get_min_residual(placed, dance, cw)
+    α = rem2pi(placed + dance, RoundNearest)
+    upper_hemisphere = α > 0
+    upper_hemisphere == cw ? -abs(α) : abs(α)
 end
 
 df = @chain "data.csv" begin
@@ -75,6 +74,7 @@ df = @chain "data.csv" begin
     @select :cw = :direction .== "cw" Not(:direction)
     @aside @assert all(_.placed .≠ _.down)
     @select :dance = get_rotation.(:placed, :down, :cw, :lap) Not(:lap)
+    @aside @assert all((sign.(_.dance) .< 0) .== _.cw)
     @aside @assert all(isapprox.(rem2pi.(_.placed .+ _.dance .- _.down, RoundNearest), 0, atol = 1e-10))
     @transform :exit = fix_stop_equals_start.(:down, :exit, :cw)
     @aside @assert all(_.exit .≠ _.down)
@@ -85,17 +85,21 @@ df = @chain "data.csv" begin
     @select :placed = rem2pi.(:placed .- :mean_down, RoundNearest) Not(:mean_down)
     @transform :upper_hemisphere = :placed .> 0
     @transform :shorter_direction = :upper_hemisphere .== :cw
-    @transform :residual = get_min_residual.(:placed, :dance)
+    @transform :residual = get_min_residual.(:placed, :dance, :cw)
 end
 
 
+_, i = findmin(df.residual)
+
+example_layer = data(df[i:i, :]) * mapping(:placed => rad2deg, :dance => rad2deg) * visual(Scatter, color = :red, markersize = 20)
 scatter_layer = data(df) * mapping(:placed => rad2deg, :dance => rad2deg) * visual(Scatter)
 abline_layer = data(DataFrame(a = 360(-2:2), b = -1, color = ["additional lap", "longer rotation direction", "shorter rotation direction", "longer rotation direction", "additional lap"])) * mapping(:a, :b, color = :color => sorter("shorter rotation direction", "longer rotation direction", "additional lap") => "") * visual(ABLines)
-fig = draw(scatter_layer + abline_layer; axis = (; aspect = DataAspect(), yticks = -720:360:720, xticks = -180:180:180))
+fig = draw(example_layer + scatter_layer + abline_layer; axis = (; aspect = DataAspect(), yticks = -720:360:720, xticks = -180:180:180))
 # display(fig)
 
+example_layer = data(df[i:i, :]) * mapping(:placed => rad2deg, :residual => rad2deg, col = :shorter_direction) * visual(Scatter, color = :red, markersize = 20)
 scatter_layer = data(df) * mapping(:placed => rad2deg, :residual => rad2deg, col = :shorter_direction) * visual(Scatter)
-fig = draw(scatter_layer; axis = (; aspect = DataAspect()))
+fig = draw(example_layer + scatter_layer; axis = (; aspect = DataAspect()))
 display(fig)
 
 
