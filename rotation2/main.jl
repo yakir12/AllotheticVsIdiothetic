@@ -1,6 +1,6 @@
 using Dates, LinearAlgebra, Statistics, Random
-using CSV, DataFrames
-using DataFramesMeta, Chain
+using CSV
+using DataFramesMeta
 using AlgebraOfGraphics
 # using CairoMakie
 using GLMakie
@@ -32,11 +32,12 @@ end
 
 get_total_rotation(start, stop, lastcw) = get_total_rotation(start, stop, start > stop, 0)
 
-function fix_stop(start, stop, lastcw)
+function fix_stop_equals_start(start, stop, lastcw)
     start ≠ stop && return stop
     Δ = lastcw ? -0.01 : 0.01
     return stop + Δ
 end
+
 
 
 
@@ -76,15 +77,15 @@ df = @chain "rotation_elevation_compiled.csv" begin
     end
     @transform :cw = :rotation_1_direction .== "cw"
     transform([:exit_angle_BUTT, :go_down_angle_FACE, :placed_from_angle_FACE, :stop_1_angle_FACE, :stop_2_angle_FACE, :stop_3_angle_FACE, :total_rotation] .=> ByRow(passmissing(deg2rad)); renamecols = false)
-    @transform :go_down_angle_FACE = fix_stop.(:placed_from_angle_FACE, :go_down_angle_FACE, :cw)
+    @transform :go_down_angle_FACE = fix_stop_equals_start.(:placed_from_angle_FACE, :go_down_angle_FACE, :cw)
     @transform :placed2down = get_total_rotation.(:placed_from_angle_FACE, :go_down_angle_FACE, :cw, :full_lap_1)
     @transform :placed_from_left = sign.(:placed_from_angle_FACE .- :go_down_angle_FACE) .> 0
     @transform :shorter_direction = :placed_from_left .== :cw
 end
 
-hist(df.go_down_angle_FACE)
+# hist(df.go_down_angle_FACE)
 
-combine(groupby(df, :elevation), :cw => count)
+# combine(groupby(df, :elevation), :cw => count)
 
 # scatter(abs.(df.go_down_angle_FACE .- df.exit_angle_BUTT) .- pi)
 

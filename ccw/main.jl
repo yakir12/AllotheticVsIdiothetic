@@ -1,19 +1,19 @@
-using Statistics
-using CSV, DataFrames
+using Statistics#, Random
+using CSV
+using DataFramesMeta
 using AlgebraOfGraphics
-# using GLMakie
-using CairoMakie
+using GLMakie
+# using CairoMakie
 # using MixedModels, GLM
-using Random
-using Optim
+# using Optim
 
-pt = 4/3
-inch = 96
-cm = inch / 2.54
+const pt = 4/3
+const inch = 96
+const cm = inch / 2.54
 
 # rm.(filter(==(".png") ∘ last ∘ splitext, readdir()))
 
-function get_total_rotation(start, stop, cw, fullturns)
+function get_rotation(start, stop, cw, fullturns)
     if start < stop
         if cw 
             stop -= (fullturns + 1)*2π #
@@ -32,13 +32,77 @@ function get_total_rotation(start, stop, cw, fullturns)
     return stop - start
 end
 
-get_total_rotation(start, stop, lastcw) = get_total_rotation(start, stop, start > stop, 0)
+get_rotation(start, stop, lastcw) = get_rotation(start, stop, start > stop, 0)
 
-function fix_stop(start, stop, lastcw)
+function fix_stop_equals_start(start, stop, lastcw)
     start ≠ stop && return stop
     Δ = lastcw ? -0.01 : 0.01
     return stop + Δ
 end
+
+angular_mean(θs) = angle(sum(exp, 1im*θs))
+
+function get_min_residual(placed, dance)
+    intercepts = -720:360:720
+    Δs = deg2rad.(intercepts) .- placed .- dance
+    _, i = findmin(abs, Δs)
+    Δs[i]
+end
+
+df = @chain "data.csv" begin
+    CSV.read(DataFrame; select = ["individual_number",
+                                               "placed from angle (degrees)",
+                                               "rotation 1 direction",
+                                               "rotation category measured",
+                                               "exit angle (degrees)",
+                                               "go down angle (degrees)",
+                                               "full lap"])
+    @rename begin
+        :id = $"individual_number"
+        :placed = $"placed from angle (degrees)"
+        :direction = $"rotation 1 direction"
+        :category = $"rotation category measured"
+        :exit = $"exit angle (degrees)"
+        :down = $"go down angle (degrees)"
+        :lap = $"full lap"
+    end
+    @rsubset :category ∈ ("cw", "ccw")
+    @aside @assert all(_.direction .== _.category)
+    @select Not(:category)
+    @aside @assert all(c -> all(0 .≤ _[!,c] .≤ 360), [:placed, :exit, :down])
+    # transform([:placed, :exit, :down] .=> ByRow(x -> x - 180), renamecols = false)
+    transform([:placed, :exit, :down] .=> ByRow(deg2rad), renamecols = false)
+    @select :cw = :direction .== "cw" Not(:direction)
+    @aside @assert all(_.placed .≠ _.down)
+    @select :dance = get_rotation.(:placed, :down, :cw, :lap) Not(:lap)
+    @aside @assert all(isapprox.(rem2pi.(_.placed .+ _.dance .- _.down, RoundNearest), 0, atol = 1e-10))
+    @transform :exit = fix_stop_equals_start.(:down, :exit, :cw)
+    @aside @assert all(_.exit .≠ _.down)
+    @transform :down2exit = get_rotation.(:down, :exit, :cw)
+    @select Not(:exit)
+    @groupby :id
+    @select :mean_down = angular_mean(:down) Not(:down)
+    @select :placed = rem2pi.(:placed .- :mean_down, RoundNearest) Not(:mean_down)
+    @transform :upper_hemisphere = :placed .> 0
+    @transform :shorter_direction = :upper_hemisphere .== :cw
+    @transform :residual = get_min_residual.(:placed, :dance)
+end
+
+
+scatter_layer = data(df) * mapping(:placed => rad2deg, :dance => rad2deg) * visual(Scatter)
+abline_layer = data(DataFrame(a = 360(-2:2), b = -1, color = ["additional lap", "longer rotation direction", "shorter rotation direction", "longer rotation direction", "additional lap"])) * mapping(:a, :b, color = :color => sorter("shorter rotation direction", "longer rotation direction", "additional lap") => "") * visual(ABLines)
+fig = draw(scatter_layer + abline_layer; axis = (; aspect = DataAspect(), yticks = -720:360:720, xticks = -180:180:180))
+# display(fig)
+
+scatter_layer = data(df) * mapping(:placed => rad2deg, :residual => rad2deg, col = :shorter_direction) * visual(Scatter)
+fig = draw(scatter_layer; axis = (; aspect = DataAspect()))
+display(fig)
+
+
+
+
+skdjfhsljkhflsdhjdfsdhjk
+
 
 df = CSV.read("data.csv", DataFrame, select = ["individual_number",
                                                "placed from angle (degrees)",
@@ -47,7 +111,7 @@ df = CSV.read("data.csv", DataFrame, select = ["individual_number",
                                                "exit angle (degrees)",
                                                "go down angle (degrees)",
                                                "full lap",
-                                              "total absolute degrees of rotation"])
+                                               "total absolute degrees of rotation"])
 
 transform!(groupby(df, :individual_number), :individual_number => (g -> 1:length(g)) => :n)
 
@@ -58,6 +122,7 @@ dforg = copy(df)
 subset!(df, "rotation category measured" => ByRow(∈(("cw", "ccw"))))
 @assert all(df[!, "rotation 1 direction"] .== df[!, "rotation category measured"])
 select!(df, Not("rotation category measured"))
+
 
 transform!(df, ["placed from angle (degrees)",
                 "exit angle (degrees)",
@@ -75,7 +140,7 @@ select!(df, Not("rotation 1 direction"))
 transform!(df, ["placed from angle", "go down angle", "cw", "full lap"] => ByRow(get_total_rotation) => :total_dance)
 rename!(df, "placed from angle" => :start)
 
-transform!(df, ["go down angle", "exit angle", "cw"] => ByRow(fix_stop) => "exit angle")
+transform!(df, ["go down angle", "exit angle", "cw"] => ByRow(fix_stop_equals_start) => "exit angle")
 transform!(df, ["go down angle", "exit angle", "cw"] => ByRow(get_total_rotation) => :down2exit)
 # rename!(df, "go down angle" => :down)
 rename!(df, "exit angle" => :exit)
