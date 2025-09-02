@@ -5,7 +5,7 @@ using AlgebraOfGraphics
 using GLMakie
 # using CairoMakie
 # using MixedModels, GLM
-# using Optim
+using Optim
 
 const pt = 4/3
 const inch = 96
@@ -42,10 +42,13 @@ end
 
 angular_mean(θs) = angle(sum(exp, 1im*θs))
 
-function get_min_residual(placed, dance, cw)
-    α = rem2pi(placed + dance, RoundNearest)
-    upper_hemisphere = α > 0
-    upper_hemisphere == cw ? -abs(α) : abs(α)
+function get_residual(placed, dance)
+    down = placed + dance
+    α = rem2pi(down, RoundNearest)
+    if placed > 0
+        α *= -1
+    end
+    α
 end
 
 df = @chain "data.csv" begin
@@ -78,30 +81,224 @@ df = @chain "data.csv" begin
     @aside @assert all(isapprox.(rem2pi.(_.placed .+ _.dance .- _.down, RoundNearest), 0, atol = 1e-10))
     @transform :exit = fix_stop_equals_start.(:down, :exit, :cw)
     @aside @assert all(_.exit .≠ _.down)
-    @transform :down2exit = get_rotation.(:down, :exit, :cw)
-    @select Not(:exit)
+end
+
+corr = @chain df begin
     @groupby :id
-    @select :mean_down = angular_mean(:down) Not(:down)
-    @select :placed = rem2pi.(:placed .- :mean_down, RoundNearest) Not(:mean_down)
-    @transform :upper_hemisphere = :placed .> 0
-    @transform :shorter_direction = :upper_hemisphere .== :cw
-    @transform :residual = get_min_residual.(:placed, :dance, :cw)
+    combine(:down => rad2deg ∘ angular_mean => :mean_down, 
+            :exit => rad2deg ∘ angular_mean => :mean_exit)
+end
+
+# AlgebraOfGraphics.set_aog_theme!()
+
+set_theme!(Theme(Figure = (size = (5cm, 10cm), fontsize = 8pt, fonts = (; regular = "Helvetica")), Axis = (xticksize = 3, yticksize = 3, titlesize = 8pt, titlefont = :regular, xlabelsize = 8pt, ylabelsize = 8pt, xticklabelsize = 6pt, yticklabelsize = 6pt)))
+
+(pregrouped([0], [1]) * visual(ABLines; color = :gray) + data(corr) * mapping(:mean_exit => "Mean exit (°)", :mean_down => "Mean down (°)") * visual(Scatter)) |> draw(; axis = (; xticks = -180:90:180, yticks = -180:90:180, aspect = DataAspect()))
+
+@chain df begin
+    @select! Not(:exit)
+    @groupby :id
+    @select! :mean_down = angular_mean(:down) Not(:down)
+    @select! :placed = rem2pi.(:placed .- :mean_down, RoundNearest) Not(:mean_down)
+    @rtransform! :direction = (:placed .> 0) == :cw ? "shorter" : "longer" 
+end
+
+fig = Figure()
+ax2 = Axis(fig[1,1], limits = (-190, 190, -730, 730), aspect = AxisAspect(190/730), xaxisposition = :top, yaxisposition = :right, xticks = ([-90, 90], ["Left", "Right"]), yticks = ([-360, 360], ["Counterclockwise", "Clockwise"]), yticklabelrotation = -π/2)
+hidespines!(ax2)
+hidedecorations!(ax2, ticklabels = false)
+scatter!(ax2, rad2deg.(df.placed), rad2deg.(df.dance), color = :transparent)
+ax = Axis(fig[1,1], xreversed = true, yreversed = true, limits = (-190, 190, -730, 730), aspect = AxisAspect(190/730), yticks = -720:360:720, xticks = -180:180:180, ylabel = "Dance (°)", xlabel = "Placed (°)")
+for (i, label) in zip([0, 1, 2, -1, -2], ["shorter rotation direction", "longer rotation direction", "additional lap", "longer rotation direction", "additional lap"])
+    ablines!(ax, 360i, -1; label, color = abs(i), colorrange = (0, 2), colormap = Makie.wong_colors())
+end
+scatter!(ax, rad2deg.(df.placed), rad2deg.(df.dance), color = (:black, 0.5))
+Legend(fig[1,2], ax, merge = true)
+save("scatter.png", fig)
+
+@chain df begin
+    @transform! :residual = get_residual.(:placed, :dance) :shortdirection = :cw .== (:placed .> 0)
+end
+
+data(df) * mapping(:shortdirection, :residual) * visual(Hist) |> draw()
+
+
+sdjkfhsdjfhasdklfhjl
+
+function to_minimize(placed, dance, μ)
+    s = 0.0
+    for (_x, y) in zip(placed, dance)
+        x = rem2pi(_x .- μ, RoundNearest)
+        r, _ = findmin(i -> abs(y - (i*2π - x)), -2:2)
+        s += r
+    end
+    return s
+end
+
+function get_min_residual(placed, dance, cw)
+    intercepts = 360(-2:2)
+    dance2 = -placed .+ deg2rad.(intercepts)
+    Δ = dance .- dance2
+    _,i = findmin(abs.(Δ))
+    down = placed + dance
+    @assert isapprox(Δ[i], rem2pi(down, RoundNearest), atol = 1e-10) Δ[i] , rem2pi(placed + dance, RoundNearest)
+    shoot = if cw == Δ[i] > 0
+        down > deg2rad(intercepts[i]) ? "undershoot" : "overshoot"
+    else
+        down < deg2rad(intercepts[i]) ? "undershoot" : "overshoot"
+    end
+    (; residual = Δ[i], line = intercepts[i], shoot)
+end
+
+df = @chain "data.csv" begin
+    CSV.read(DataFrame; select = ["individual_number",
+                                  "placed from angle (degrees)",
+                                  "rotation 1 direction",
+                                  "rotation category measured",
+                                  "exit angle (degrees)",
+                                  "go down angle (degrees)",
+                                  "full lap"])
+    @rename begin
+        :id = $"individual_number"
+        :placed = $"placed from angle (degrees)"
+        :direction = $"rotation 1 direction"
+        :category = $"rotation category measured"
+        :exit = $"exit angle (degrees)"
+        :down = $"go down angle (degrees)"
+        :lap = $"full lap"
+    end
+    @rsubset :category ∈ ("cw", "ccw")
+    @aside @assert all(_.direction .== _.category)
+    @select Not(:category)
+    @aside @assert all(c -> all(0 .≤ _[!,c] .≤ 360), [:placed, :exit, :down])
+    # transform([:placed, :exit, :down] .=> ByRow(x -> x - 180), renamecols = false)
+    transform([:placed, :exit, :down] .=> ByRow(deg2rad), renamecols = false)
+    @select :cw = :direction .== "cw" Not(:direction)
+    @aside @assert all(_.placed .≠ _.down)
+    @select :dance = get_rotation.(:placed, :down, :cw, :lap) Not(:lap)
+    @aside @assert all((sign.(_.dance) .< 0) .== _.cw)
+    @aside @assert all(isapprox.(rem2pi.(_.placed .+ _.dance .- _.down, RoundNearest), 0, atol = 1e-10))
+    @transform :exit = fix_stop_equals_start.(:down, :exit, :cw)
+    @aside @assert all(_.exit .≠ _.down)
+    @transform :down2exit = get_rotation.(:down, :exit, :cw)
+    @groupby :id
+    select(:down => angular_mean => :mean_down, 
+           :exit => angular_mean => :mean_exit, 
+           [:placed, :dance] => ((placed, dance) -> optimize(μ -> to_minimize(placed, dance, μ), -π, π).minimizer) => :mean_optimal,
+           Not(:down, :exit))
+    # @select :means = [angular_mean(:down), angular_mean(:exit)] Not(:down)
+    @select begin
+        :placed_down = rem2pi.(:placed .- :mean_down, RoundNearest) 
+        :placed_exit = rem2pi.(:placed .- :mean_exit, RoundNearest) 
+        :placed_optimal = rem2pi.(:placed .- :mean_optimal, RoundNearest) 
+        Not(:mean_down, :mean_exit, :mean_optimal)
+    end
+    @rtransform begin 
+        :direction_down = (:placed_down .> 0) == :cw ? "shorter" : "longer" 
+        :direction_exit = (:placed_exit .> 0) == :cw ? "shorter" : "longer"
+        :direction_optimal = (:placed_optimal .> 0) == :cw ? "shorter" : "longer"
+    end
+    transform([:placed_down, :dance, :cw] => ByRow(get_min_residual) => [:residual_down, :line_down, :shoot_down], 
+              [:placed_exit, :dance, :cw] => ByRow(get_min_residual) => [:residual_exit, :line_exit, :shoot_exit],
+              [:placed_optimal, :dance, :cw] => ByRow(get_min_residual) => [:residual_optimal, :line_optimal, :shoot_optimal])
+    # @transform :norm_resid = abs.(:residual_down ./ :dance)
 end
 
 
-_, i = findmin(df.residual)
+for μ in (:_down, :_exit, :_optimal)
+    scatter_layer = data(df) * mapping(Symbol(:placed, μ) => rad2deg, :dance => rad2deg) * visual(Scatter)
+    abline_layer = data(DataFrame(a = 360(-2:2), b = -1, color = ["additional lap", "longer rotation direction", "shorter rotation direction", "longer rotation direction", "additional lap"])) * mapping(:a, :b, color = :color => sorter("shorter rotation direction", "longer rotation direction", "additional lap") => "") * visual(ABLines)
+    fig = draw(scatter_layer + abline_layer; axis = (; aspect = DataAspect(), yticks = -720:360:720, xticks = -180:180:180))
+    save("scatter$μ.png", fig)
+end
 
-example_layer = data(df[i:i, :]) * mapping(:placed => rad2deg, :dance => rad2deg) * visual(Scatter, color = :red, markersize = 20)
-scatter_layer = data(df) * mapping(:placed => rad2deg, :dance => rad2deg) * visual(Scatter)
-abline_layer = data(DataFrame(a = 360(-2:2), b = -1, color = ["additional lap", "longer rotation direction", "shorter rotation direction", "longer rotation direction", "additional lap"])) * mapping(:a, :b, color = :color => sorter("shorter rotation direction", "longer rotation direction", "additional lap") => "") * visual(ABLines)
-fig = draw(example_layer + scatter_layer + abline_layer; axis = (; aspect = DataAspect(), yticks = -720:360:720, xticks = -180:180:180))
-# display(fig)
+μ = :_down
+df2 = @transform df :norm_dance = :dance .- (-:placed_down .+ deg2rad.(:line_down))
+@rtransform! df2 :norm_dance = :placed_down > 0 ? -:norm_dance : :norm_dance
+@rtransform! df2 :shorter = :cw == (:placed_down > 0)
+scatter_layer = data(df2) * mapping(:shorter, :norm_dance => rad2deg, color = :shorter) * visual(BoxPlot)
+# abline_layer = data(DataFrame(a = 360(-2:2), b = 0, color = ["additional lap", "longer rotation direction", "shorter rotation direction", "longer rotation direction", "additional lap"])) * mapping(:a, :b, color = :color => sorter("shorter rotation direction", "longer rotation direction", "additional lap") => "") * visual(ABLines)
+fig = draw(scatter_layer)#; axis = (; yticks = -720:360:720, xticks = -180:180:180))
 
-example_layer = data(df[i:i, :]) * mapping(:placed => rad2deg, :residual => rad2deg, col = :shorter_direction) * visual(Scatter, color = :red, markersize = 20)
-scatter_layer = data(df) * mapping(:placed => rad2deg, :residual => rad2deg, col = :shorter_direction) * visual(Scatter)
-fig = draw(example_layer + scatter_layer; axis = (; aspect = DataAspect()))
-display(fig)
 
+df2 = @rsubset df (:direction_down == "longer" && :line_down == 360) || (:direction_down == "shorter" && :line_down == 0)
+violin_layer = data(df2) * mapping(:direction_down => sorter("shorter", "longer") => "Turning direction", :residual_down => rad2deg => "Residuals (°)") * visual(BoxPlot)
+# violin_layer = data(df2) * mapping(:direction_down => sorter("shorter", "longer") => "Turning direction", :residual_down => rad2deg => "Residuals (°)", color = :shoot_down => sorter("undershoot", "overshoot") => "", dodge = :shoot_down) * visual(BoxPlot)
+fig = draw(violin_layer)#; axis = (; yticks = 0:30:180, width = 200, height = 200))
+resize_to_layout!(fig)
+
+
+for μ in (:_down, :_exit, :_optimal)
+
+    μ = :_down
+    scatter_layer = data(df) * mapping(Symbol(:placed, μ) => rad2deg, Symbol(:residual, μ) => rad2deg, col = Symbol(:direction, μ), row = Symbol(:line, μ) => nonnumeric, color = Symbol(:shoot, μ)) * visual(Scatter)
+    # band_layer = data(rename(intervals, Dict(x => Symbol(x, μ) for x in [:direction, :line, :shoot]))) * mapping(:placed, :lower, :upper, col = Symbol(:direction, μ), row = Symbol(:line, μ) => nonnumeric, color = Symbol(:shoot, μ)) * visual(Band; alpha = 0.2)
+    fig = draw(scatter_layer)#; axis = (; xticks = 0:90:180, yticks = 0:90:180, limits = (-10, 190, -10, 190), width = 200, height = 200))
+    resize_to_layout!(fig)
+    save("residual$μ.png", fig)
+
+end
+
+sdhgfksdhjgksdjhfgksdfjhg
+
+function get_intervals(direction, line, shoot, placed)
+    if direction == "longer"
+        if line == 0
+            if shoot == "undershoot"
+                (missing, missing)
+            else
+                (placed, 180)
+            end
+        else
+            (0, 180)
+        end
+    else
+        if line == 0
+            if shoot == "undershoot"
+                (0, placed)
+            else
+                (0, 180)
+            end
+        else
+            (0, 180)
+        end
+    end
+end
+
+intervals = @chain DataFrame(direction = ["longer", "shorter"]) begin
+    @rtransform :line = 0:360:720
+    flatten(:line)
+    @rtransform :shoot = ["undershoot", "overshoot"]
+    flatten(:shoot)
+    @rtransform :placed = 0:180
+    flatten(:placed)
+    transform([:direction, :line, :shoot, :placed] => ByRow(get_intervals) => [:lower, :upper])
+    dropmissing(:lower)
+end
+
+
+
+for mean in (:_down, :_exit, :_optimal)
+    scatter_layer = data(df) * mapping(Symbol(:placed, mean) => rad2deg, :dance => rad2deg) * visual(Scatter)
+    abline_layer = data(DataFrame(a = 360(-2:2), b = -1, color = ["additional lap", "longer rotation direction", "shorter rotation direction", "longer rotation direction", "additional lap"])) * mapping(:a, :b, color = :color => sorter("shorter rotation direction", "longer rotation direction", "additional lap") => "") * visual(ABLines)
+    fig = draw(scatter_layer + abline_layer; axis = (; aspect = DataAspect(), yticks = -720:360:720, xticks = -180:180:180))
+    save("scatter$mean.png", fig)
+    scatter_layer = data(df) * mapping(Symbol(:placed, mean) => rad2deg ∘ abs, Symbol(:residual, mean) => rad2deg, col = Symbol(:direction, mean), row = Symbol(:line, mean) => nonnumeric, color = Symbol(:shoot, mean)) * visual(Scatter)
+    band_layer = data(rename(intervals, Dict(x => Symbol(x, mean) for x in [:direction, :line, :shoot]))) * mapping(:placed, :lower, :upper, col = Symbol(:direction, mean), row = Symbol(:line, mean) => nonnumeric, color = Symbol(:shoot, mean)) * visual(Band; alpha = 0.2)
+    fig = draw(band_layer + scatter_layer; axis = (; xticks = 0:90:180, yticks = 0:90:180, limits = (-10, 190, -10, 190), width = 200, height = 200))
+    resize_to_layout!(fig)
+    save("residual$mean.png", fig)
+end
+
+
+# μ = :_down
+# scatter_layer = data(df) * mapping(:dance => rad2deg ∘ abs, :norm_resid, col = Symbol(:direction, μ), row = Symbol(:line, μ) => nonnumeric, color = Symbol(:shoot, μ)) * visual(Scatter)
+# # abline_layer = pregrouped([0], [1]) * visual(ABLines; color = :gray)
+# fig = draw(scatter_layer; axis = (; width = 200, height = 200))
+# resize_to_layout!(fig)
+
+# fig = scatter(rad2deg.(abs.(df.placed_down)), rad2deg.(abs.(df.dance)), axis = (; xlabel = "placed", ylabel = "danced", aspect = DataAspect()))
+# ablines!(0, 1, color = :black)
 
 
 
