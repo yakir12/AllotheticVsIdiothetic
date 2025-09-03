@@ -7,6 +7,8 @@ using GLMakie
 # using MixedModels, GLM
 using Optim
 
+set_theme!(Theme(Figure = (size = (5cm, 10cm), fontsize = 8pt, fonts = (; regular = "Helvetica")), Axis = (xticksize = 3, yticksize = 3, titlesize = 8pt, titlefont = :regular, xlabelsize = 8pt, ylabelsize = 8pt, xticklabelsize = 6pt, yticklabelsize = 6pt)))
+
 const pt = 4/3
 const inch = 96
 const cm = inch / 2.54
@@ -53,12 +55,14 @@ end
 
 df = @chain "data.csv" begin
     CSV.read(DataFrame; select = ["individual_number",
-                                               "placed from angle (degrees)",
-                                               "rotation 1 direction",
-                                               "rotation category measured",
-                                               "exit angle (degrees)",
-                                               "go down angle (degrees)",
-                                               "full lap"])
+                                  "placed from angle (degrees)",
+                                  "rotation 1 direction",
+                                  "rotation category measured",
+                                  "exit angle (degrees)",
+                                  "go down angle (degrees)",
+                                  "full lap",
+                                  "n",
+                                  "total absolute degrees of rotation"])
     @rename begin
         :id = $"individual_number"
         :placed = $"placed from angle (degrees)"
@@ -67,6 +71,7 @@ df = @chain "data.csv" begin
         :exit = $"exit angle (degrees)"
         :down = $"go down angle (degrees)"
         :lap = $"full lap"
+        :total = $"total absolute degrees of rotation"
     end
     @rsubset :category ∈ ("cw", "ccw")
     @aside @assert all(_.direction .== _.category)
@@ -81,46 +86,87 @@ df = @chain "data.csv" begin
     @aside @assert all(isapprox.(rem2pi.(_.placed .+ _.dance .- _.down, RoundNearest), 0, atol = 1e-10))
     @transform :exit = fix_stop_equals_start.(:down, :exit, :cw)
     @aside @assert all(_.exit .≠ _.down)
+    @select Not(:exit)
+    @groupby :id
+    @select :mean_down = angular_mean(:down) Not(:down)
+    @groupby :id
+    @transform number the runs within id
+    @select :placed = rem2pi.(:placed .- :mean_down, RoundNearest) Not(:mean_down)
+    @rtransform :direction = (:placed .> 0) == :cw ? "shorter" : "longer" 
+    @transform :residual = get_residual.(:placed, :dance)
 end
 
-corr = @chain df begin
-    @groupby :id
-    combine(:down => rad2deg ∘ angular_mean => :mean_down, 
-            :exit => rad2deg ∘ angular_mean => :mean_exit)
-end
+# using MixedModels
+#
+# m = lmm(@formula(exit ~ down + (1|id)), df)
+#
+# corr = @chain df begin
+#     @groupby :id
+#     transform(:down => angular_mean => :mean_down, 
+#             :exit => angular_mean => :mean_exit)
+#     @transform :down = rem2pi.(:down .- :mean_down, RoundNearest) :exit = rem2pi.(:exit .- :mean_exit, RoundNearest)
+# end
 
 # AlgebraOfGraphics.set_aog_theme!()
 
-set_theme!(Theme(Figure = (size = (5cm, 10cm), fontsize = 8pt, fonts = (; regular = "Helvetica")), Axis = (xticksize = 3, yticksize = 3, titlesize = 8pt, titlefont = :regular, xlabelsize = 8pt, ylabelsize = 8pt, xticklabelsize = 6pt, yticklabelsize = 6pt)))
 
-(pregrouped([0], [1]) * visual(ABLines; color = :gray) + data(corr) * mapping(:mean_exit => "Mean exit (°)", :mean_down => "Mean down (°)") * visual(Scatter)) |> draw(; axis = (; xticks = -180:90:180, yticks = -180:90:180, aspect = DataAspect()))
+# (pregrouped([0], [1]) * visual(ABLines; color = :gray) + data(corr) * mapping(:exit => rad2deg => "Mean exit (°)", :down => rad2deg => "Mean down (°)", color = :id => nonnumeric) * visual(Scatter)) |> draw(; axis = (; xticks = -180:90:180, yticks = -180:90:180, aspect = DataAspect()))
 
-@chain df begin
-    @select! Not(:exit)
-    @groupby :id
-    @select! :mean_down = angular_mean(:down) Not(:down)
-    @select! :placed = rem2pi.(:placed .- :mean_down, RoundNearest) Not(:mean_down)
-    @rtransform! :direction = (:placed .> 0) == :cw ? "shorter" : "longer" 
-end
 
+
+colors = reverse(Makie.wong_colors())
+gap = 40
 fig = Figure()
-ax2 = Axis(fig[1,1], limits = (-190, 190, -730, 730), aspect = AxisAspect(190/730), xaxisposition = :top, yaxisposition = :right, xticks = ([-90, 90], ["Left", "Right"]), yticks = ([-360, 360], ["Counterclockwise", "Clockwise"]), yticklabelrotation = -π/2)
+ax2 = Axis(fig[1:3,1], limits = (-180 - gap, 180 + gap, -720 - gap, 720 + gap), aspect = AxisAspect((180 + gap)/(720 + gap)), xaxisposition = :top, yaxisposition = :right, xticks = ([-90, 90], [rich("Left", color = colors[5]), rich("Right", color = colors[4])]), yticks = ([-360, 360], [rich("Counterclockwise", color = colors[7]), rich("Clockwise", color = colors[6])]), yticklabelrotation = -π/2)
 hidespines!(ax2)
 hidedecorations!(ax2, ticklabels = false)
-scatter!(ax2, rad2deg.(df.placed), rad2deg.(df.dance), color = :transparent)
-ax = Axis(fig[1,1], xreversed = true, yreversed = true, limits = (-190, 190, -730, 730), aspect = AxisAspect(190/730), yticks = -720:360:720, xticks = -180:180:180, ylabel = "Dance (°)", xlabel = "Placed (°)")
+ax = Axis(fig[1:3,1], xreversed = true, yreversed = true, limits = (-180 - gap, 180 + gap, -720 - gap, 720 + gap), aspect = AxisAspect((180 + gap)/(720 + gap)), yticks = -720:360:720, xticks = -180:180:180, ylabel = "Dance (°)", xlabel = "Placed (°)")
 for (i, label) in zip([0, 1, 2, -1, -2], ["shorter rotation direction", "longer rotation direction", "additional lap", "longer rotation direction", "additional lap"])
-    ablines!(ax, 360i, -1; label, color = abs(i), colorrange = (0, 2), colormap = Makie.wong_colors())
+    ablines!(ax, 360i, -1; label, color = abs(i), colorrange = (0, 2), colormap = colors, linestyle = :dash)
 end
 scatter!(ax, rad2deg.(df.placed), rad2deg.(df.dance), color = (:black, 0.5))
+poly!(ax, Rect(-180 - gap/2, -720 - gap/2, 175 + gap/2, 2*720 + gap), color = (colors[4], 0.2))
+poly!(ax, Rect(5, -720 - gap/2, 180 + gap/2, 2*720 + gap), color = (colors[5], 0.2))
+poly!(ax, Rect(-180 - 0.75gap, -720 - 0.75gap, 360 + 1.5gap, 715 + 0.75gap), color = :transparent, strokecolor = colors[6], strokewidth = 2)
+poly!(ax, Rect(-180 - 0.75gap, 5, 360 + 1.5gap, 720 + 0.75gap), color = :transparent, strokecolor = colors[7], strokewidth = 2)
 Legend(fig[1,2], ax, merge = true)
+ax = Axis(fig[2,2], xlabel = "Residuals (°)", ylabel = "Counts", xticks = -180:90:180)
+hist!(ax, rad2deg.(df.residual), color = :black)
+ax = Axis(fig[2,3], xlabel = "Dance number", ylabel = "Totoal rotation (°)", yticks = 0:180:720)
+boxplot!(ax, df.n, df.total, color = :black)
+
+display(fig)
+
 save("scatter.png", fig)
 
-@chain df begin
-    @transform! :residual = get_residual.(:placed, :dance) :shortdirection = :cw .== (:placed .> 0)
+
+sdjkfhsdjfhasdklfhjl
+
+
+OneSampleTTest(df.residual)
+
+
+df2 = @chain df begin
+    @subset deg2rad(20) .< abs.(:placed) .< deg2rad(160) abs.(:dance) .< deg2rad(400)
+    @transform :residual = get_residual.(:placed, :dance) :shortdirection = :cw .== (:placed .> 0)
 end
 
-data(df) * mapping(:shortdirection, :residual) * visual(Hist) |> draw()
+data(df2) * mapping(:residual => rad2deg, color = :shortdirection, stack=:shortdirection) * histogram(bins = 20) |> draw()
+
+combine(groupby(df2, :shortdirection), :residual .=> [rad2deg ∘ mean, rad2deg ∘ std])
+
+using HypothesisTests
+
+g1, g2 = groupby(df2, :shortdirection)
+@show VarianceFTest(g1.residual, g2.residual)
+
+@show UnequalVarianceTTest(g1.residual, g2.residual)
+
+data(df2) * mapping(:residual => rad2deg) * histogram(bins = 15) |> draw()
+
+rad2deg(mean(df2.residual))
+
+OneSampleTTest(df2.residual)
 
 
 sdjkfhsdjfhasdklfhjl
