@@ -7,11 +7,12 @@ using GLMakie
 # using MixedModels, GLM
 using Optim
 
-set_theme!(Theme(Figure = (size = (5cm, 10cm), fontsize = 8pt, fonts = (; regular = "Helvetica")), Axis = (xticksize = 3, yticksize = 3, titlesize = 8pt, titlefont = :regular, xlabelsize = 8pt, ylabelsize = 8pt, xticklabelsize = 6pt, yticklabelsize = 6pt)))
 
 const pt = 4/3
 const inch = 96
 const cm = inch / 2.54
+
+set_theme!(Theme(Figure = (size = (5cm, 10cm), fontsize = 8pt, fonts = (; regular = "Helvetica")), Axis = (xticksize = 3, yticksize = 3, titlesize = 8pt, titlefont = :regular, xlabelsize = 8pt, ylabelsize = 8pt, xticklabelsize = 6pt, yticklabelsize = 6pt), Legend = (labelsize = 8pt, labelfont = "Helvetica")))
 
 # rm.(filter(==(".png") ∘ last ∘ splitext, readdir()))
 
@@ -73,6 +74,12 @@ df = @chain "data.csv" begin
         :lap = $"full lap"
         :total = $"total absolute degrees of rotation"
     end
+    @aside begin @chain _ begin
+            @groupby :id
+            @select :n = 1:length(:down) :id :total
+            trial_number = _
+        end
+    end
     @rsubset :category ∈ ("cw", "ccw")
     @aside @assert all(_.direction .== _.category)
     @select Not(:category)
@@ -88,9 +95,7 @@ df = @chain "data.csv" begin
     @aside @assert all(_.exit .≠ _.down)
     @select Not(:exit)
     @groupby :id
-    @select :mean_down = angular_mean(:down) Not(:down)
-    @groupby :id
-    @transform number the runs within id
+    @select :mean_down = angular_mean(:down) :n = 1:length(:down) Not(:down)
     @select :placed = rem2pi.(:placed .- :mean_down, RoundNearest) Not(:mean_down)
     @rtransform :direction = (:placed .> 0) == :cw ? "shorter" : "longer" 
     @transform :residual = get_residual.(:placed, :dance)
@@ -120,7 +125,7 @@ fig = Figure()
 ax2 = Axis(fig[1:3,1], limits = (-180 - gap, 180 + gap, -720 - gap, 720 + gap), aspect = AxisAspect((180 + gap)/(720 + gap)), xaxisposition = :top, yaxisposition = :right, xticks = ([-90, 90], [rich("Left", color = colors[5]), rich("Right", color = colors[4])]), yticks = ([-360, 360], [rich("Counterclockwise", color = colors[7]), rich("Clockwise", color = colors[6])]), yticklabelrotation = -π/2)
 hidespines!(ax2)
 hidedecorations!(ax2, ticklabels = false)
-ax = Axis(fig[1:3,1], xreversed = true, yreversed = true, limits = (-180 - gap, 180 + gap, -720 - gap, 720 + gap), aspect = AxisAspect((180 + gap)/(720 + gap)), yticks = -720:360:720, xticks = -180:180:180, ylabel = "Dance (°)", xlabel = "Placed (°)")
+ax = Axis(fig[1:3,1], xreversed = true, yreversed = true, limits = (-180 - gap, 180 + gap, -720 - gap, 720 + gap), aspect = AxisAspect((180 + gap)/(720 + gap)), yticks = -720:360:720, xticks = -180:180:180, ylabel = "Accumulated yaw (°)", xlabel = "Initial orientation relative to intended bearing (°)")
 for (i, label) in zip([0, 1, 2, -1, -2], ["shorter rotation direction", "longer rotation direction", "additional lap", "longer rotation direction", "additional lap"])
     ablines!(ax, 360i, -1; label, color = abs(i), colorrange = (0, 2), colormap = colors, linestyle = :dash)
 end
@@ -132,8 +137,15 @@ poly!(ax, Rect(-180 - 0.75gap, 5, 360 + 1.5gap, 720 + 0.75gap), color = :transpa
 Legend(fig[1,2], ax, merge = true)
 ax = Axis(fig[2,2], xlabel = "Residuals (°)", ylabel = "Counts", xticks = -180:90:180)
 hist!(ax, rad2deg.(df.residual), color = :black)
-ax = Axis(fig[2,3], xlabel = "Dance number", ylabel = "Totoal rotation (°)", yticks = 0:180:720)
-boxplot!(ax, df.n, df.total, color = :black)
+ax = Axis(fig[3,2], xlabel = "Sequential rotation events", ylabel = "Absolute accumulated yaw (°)", yticks = 0:180:1000)
+for g in groupby(trial_number, :id)
+    lines!(ax, g.n, g.total, color = (:black, 0.1))
+end
+boxplot!(ax, trial_number.n, trial_number.total, color = :gray)
+
+Label(fig[1:3, 1,  TopLeft()], "A", fontsize = 12pt, padding = (0, 5, 5, 0), halign = :right)
+Label(fig[2, 2, TopLeft()], "B", fontsize = 12pt, padding = (0, 5, 5, 0), halign = :right)
+Label(fig[3, 2, TopLeft()], "C", fontsize = 12pt, padding = (0, 5, 5, 0), halign = :right)
 
 display(fig)
 
