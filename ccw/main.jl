@@ -7,9 +7,6 @@ using CairoMakie
 # using MixedModels, GLM
 using Optim
 
-# GLMakie.activate!()
-CairoMakie.activate!()
-
 const pt = 4/3
 const inch = 96
 const cm = inch / 2.54
@@ -122,10 +119,11 @@ end
 # (pregrouped([0], [1]) * visual(ABLines; color = :gray) + data(corr) * mapping(:exit => rad2deg => "Mean exit (°)", :down => rad2deg => "Mean down (°)", color = :id => nonnumeric) * visual(Scatter)) |> draw(; axis = (; xticks = -180:90:180, yticks = -180:90:180, aspect = DataAspect()))
 
 
+example_individual = 24
 
 colors = reverse(Makie.wong_colors())
 gap = 40
-fig = Figure(size = (12cm, 10cm))
+fig = Figure(size = (12cm, 12cm))
 ax2 = Axis(fig[1:3,1], limits = (-180 - gap, 180 + gap, -720 - gap, 720 + gap), aspect = AxisAspect((180 + gap)/(720 + gap)), xaxisposition = :top, yaxisposition = :right, xticks = ([-90, 90], [rich("Left", color = colors[5]), rich("Right", color = colors[4])]), yticks = ([-360, 360], [rich("Counterclockwise", color = colors[7]), rich("Clockwise", color = colors[6])]), yticklabelrotation = -π/2)
 hidespines!(ax2)
 hidedecorations!(ax2, ticklabels = false)
@@ -133,16 +131,16 @@ ax = Axis(fig[1:3,1], xreversed = true, yreversed = true, limits = (-180 - gap, 
 for (i, label) in zip([0, 1, 2, -1, -2], ["shorter rotation direction", "longer rotation direction", "additional lap", "longer rotation direction", "additional lap"])
     ablines!(ax, 360i, -1; label, color = abs(i), colorrange = (0, 2), colormap = colors)#, linestyle = :dash)
 end
-_df = @subset df :id .≠ 24
+_df = @subset df :id .≠ example_individual
 transform!(_df, [:placed, :dance] .=> ByRow(rad2deg), renamecols = false)
 scatter!(ax, _df.placed, _df.dance, color = (:black, 0.5))
-_df = @subset df :id .== 24
+_df = @subset df :id .== example_individual
 transform!(_df, [:placed, :dance] .=> ByRow(rad2deg), renamecols = false)
 scatter!(ax, _df.placed, _df.dance, color = (:red, 0.5))
 poly!(ax, Rect(-180 - gap/2, -720 - gap/2, 175 + gap/2, 2*720 + gap), color = (colors[4], 0.2))
 poly!(ax, Rect(5, -720 - gap/2, 180 + gap/2, 2*720 + gap), color = (colors[5], 0.2))
 poly!(ax, Rect(-180 - 0.75gap, -720 - 0.75gap, 360 + 1.5gap, 715 + 0.75gap), color = :transparent, strokecolor = colors[6], strokewidth = 2)
-poly!(ax, Rect(-180 - 0.75gap, 5, 360 + 1.5gap, 720 + 0.75gap), color = :transparent, strokecolor = colors[7], strokewidth = 2)
+poly!(ax, Rect(-180 - 0.75gap, 5, 360 + 1.5gap, 715 + 0.75gap), color = :transparent, strokecolor = colors[7], strokewidth = 2)
 Legend(fig[1,2], ax, merge = true)
 ax = Axis(fig[2,2], xlabel = "Residuals (°)", ylabel = "Counts", xticks = -180:90:180)
 hist!(ax, rad2deg.(df.residual), color = :black)
@@ -158,7 +156,48 @@ Label(fig[3, 2, TopLeft()], "C", fontsize = 12pt, padding = (0, 5, 5, 0), halign
 
 # display(fig)
 
+# GLMakie.activate!()
+CairoMakie.activate!()
+
 save("scatter.pdf", fig)
+
+
+
+fig = Figure(size = (7cm, 11cm))
+xy = data(subset(df, :id => ByRow(≠(example_individual)))) * mapping(:placed => rad2deg, :dance => rad2deg, layout = :id => nonnumeric) * visual(Scatter; color = (:black, 0.5))
+xy42 = data(subset(df, :id => ByRow(==(example_individual)))) * mapping(:placed => rad2deg, :dance => rad2deg, layout = :id => nonnumeric) * visual(Scatter; color = (:red, 0.5))
+abline = data(DataFrame(a = 360 .* (-2:2), b = -1, color = [2,1,3,1,2])) * mapping(:a, :b, color = :color) * visual(ABLines; color = colors)
+toplot = abline + xy + xy42
+g = draw!(fig[1,1], toplot, scales(; Layout = (; legend = false) ); axis = (;  xlabel = "Initial orientation relative to intended bearing (°)", ylabel = "Total rotation (°)", xticks = [-180, 180], yticks = -720:360:720, aspect = DataAspect()))
+resize_to_layout!(fig)
+
+save("inidividual relationship.pdf", fig)
+save("inidividual relationship.png", fig)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 dfgjhsdflkhjgdlfghjsdflghjdlghj
 
