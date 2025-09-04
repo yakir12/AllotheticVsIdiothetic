@@ -3,10 +3,12 @@ using CSV
 using DataFramesMeta
 using AlgebraOfGraphics
 using GLMakie
-# using CairoMakie
+using CairoMakie
 # using MixedModels, GLM
 using Optim
 
+# GLMakie.activate!()
+CairoMakie.activate!()
 
 const pt = 4/3
 const inch = 96
@@ -80,6 +82,7 @@ df = @chain "data.csv" begin
             trial_number = _
         end
     end
+    @aside both = _
     @rsubset :category ∈ ("cw", "ccw")
     @aside @assert all(_.direction .== _.category)
     @select Not(:category)
@@ -101,6 +104,7 @@ df = @chain "data.csv" begin
     @transform :residual = get_residual.(:placed, :dance)
 end
 
+
 # using MixedModels
 #
 # m = lmm(@formula(exit ~ down + (1|id)), df)
@@ -121,15 +125,20 @@ end
 
 colors = reverse(Makie.wong_colors())
 gap = 40
-fig = Figure()
+fig = Figure(size = (12cm, 10cm))
 ax2 = Axis(fig[1:3,1], limits = (-180 - gap, 180 + gap, -720 - gap, 720 + gap), aspect = AxisAspect((180 + gap)/(720 + gap)), xaxisposition = :top, yaxisposition = :right, xticks = ([-90, 90], [rich("Left", color = colors[5]), rich("Right", color = colors[4])]), yticks = ([-360, 360], [rich("Counterclockwise", color = colors[7]), rich("Clockwise", color = colors[6])]), yticklabelrotation = -π/2)
 hidespines!(ax2)
 hidedecorations!(ax2, ticklabels = false)
-ax = Axis(fig[1:3,1], xreversed = true, yreversed = true, limits = (-180 - gap, 180 + gap, -720 - gap, 720 + gap), aspect = AxisAspect((180 + gap)/(720 + gap)), yticks = -720:360:720, xticks = -180:180:180, ylabel = "Accumulated yaw (°)", xlabel = "Initial orientation relative to intended bearing (°)")
+ax = Axis(fig[1:3,1], xreversed = true, yreversed = true, limits = (-180 - gap, 180 + gap, -720 - gap, 720 + gap), aspect = AxisAspect((180 + gap)/(720 + gap)), yticks = -720:180:720, xticks = -180:180:180, ylabel = "Total rotation (°)", xlabel = "Initial orientation relative to intended bearing (°)")
 for (i, label) in zip([0, 1, 2, -1, -2], ["shorter rotation direction", "longer rotation direction", "additional lap", "longer rotation direction", "additional lap"])
-    ablines!(ax, 360i, -1; label, color = abs(i), colorrange = (0, 2), colormap = colors, linestyle = :dash)
+    ablines!(ax, 360i, -1; label, color = abs(i), colorrange = (0, 2), colormap = colors)#, linestyle = :dash)
 end
-scatter!(ax, rad2deg.(df.placed), rad2deg.(df.dance), color = (:black, 0.5))
+_df = @subset df :id .≠ 24
+transform!(_df, [:placed, :dance] .=> ByRow(rad2deg), renamecols = false)
+scatter!(ax, _df.placed, _df.dance, color = (:black, 0.5))
+_df = @subset df :id .== 24
+transform!(_df, [:placed, :dance] .=> ByRow(rad2deg), renamecols = false)
+scatter!(ax, _df.placed, _df.dance, color = (:red, 0.5))
 poly!(ax, Rect(-180 - gap/2, -720 - gap/2, 175 + gap/2, 2*720 + gap), color = (colors[4], 0.2))
 poly!(ax, Rect(5, -720 - gap/2, 180 + gap/2, 2*720 + gap), color = (colors[5], 0.2))
 poly!(ax, Rect(-180 - 0.75gap, -720 - 0.75gap, 360 + 1.5gap, 715 + 0.75gap), color = :transparent, strokecolor = colors[6], strokewidth = 2)
@@ -137,7 +146,7 @@ poly!(ax, Rect(-180 - 0.75gap, 5, 360 + 1.5gap, 720 + 0.75gap), color = :transpa
 Legend(fig[1,2], ax, merge = true)
 ax = Axis(fig[2,2], xlabel = "Residuals (°)", ylabel = "Counts", xticks = -180:90:180)
 hist!(ax, rad2deg.(df.residual), color = :black)
-ax = Axis(fig[3,2], xlabel = "Sequential rotation events", ylabel = "Absolute accumulated yaw (°)", yticks = 0:180:1000)
+ax = Axis(fig[3,2], xlabel = "Sequential rotation events", ylabel = "Absolute total rotation (°)", yticks = 0:180:1000)
 for g in groupby(trial_number, :id)
     lines!(ax, g.n, g.total, color = (:black, 0.1))
 end
@@ -147,9 +156,73 @@ Label(fig[1:3, 1,  TopLeft()], "A", fontsize = 12pt, padding = (0, 5, 5, 0), hal
 Label(fig[2, 2, TopLeft()], "B", fontsize = 12pt, padding = (0, 5, 5, 0), halign = :right)
 Label(fig[3, 2, TopLeft()], "C", fontsize = 12pt, padding = (0, 5, 5, 0), halign = :right)
 
-display(fig)
+# display(fig)
 
-save("scatter.png", fig)
+save("scatter.pdf", fig)
+
+dfgjhsdflkhjgdlfghjsdflghjdlghj
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+both = @chain both begin
+    @rsubset :category ∉ ("cw", "ccw")
+    @aside @assert all(_.direction .≠ _.category)
+    @select Not(:category)
+    @aside @assert all(c -> all(0 .≤ _[!,c] .≤ 360), [:placed, :exit, :down])
+    transform([:placed, :exit, :down] .=> ByRow(deg2rad), renamecols = false)
+    @select :cw = :direction .== "cw" Not(:direction)
+    @aside @assert all(_.placed .≠ _.down)
+    @select :dance = get_rotation.(:placed, :down, :cw, :lap) Not(:lap)
+    @aside @assert all((sign.(_.dance) .< 0) .== _.cw)
+    @aside @assert all(isapprox.(rem2pi.(_.placed .+ _.dance .- _.down, RoundNearest), 0, atol = 1e-10))
+    @transform :exit = fix_stop_equals_start.(:down, :exit, :cw)
+    @aside @assert all(_.exit .≠ _.down)
+    @select Not(:exit)
+    @groupby :id
+    @select :mean_down = angular_mean(:down) :n = 1:length(:down) Not(:down)
+    @select :placed = rem2pi.(:placed .- :mean_down, RoundNearest) Not(:mean_down)
+    @rtransform :direction = (:placed .> 0) == :cw ? "shorter" : "longer" 
+    @transform :residual = get_residual.(:placed, :dance)
+end
+
+colors = reverse(Makie.wong_colors())
+gap = 40
+fig = Figure(size = (12cm, 10cm))
+ax2 = Axis(fig[1:3,1], limits = (-180 - gap, 180 + gap, -720 - gap, 720 + gap), aspect = AxisAspect((180 + gap)/(720 + gap)), xaxisposition = :top, yaxisposition = :right, xticks = ([-90, 90], [rich("Left", color = colors[5]), rich("Right", color = colors[4])]), yticks = ([-360, 360], [rich("Counterclockwise", color = colors[7]), rich("Clockwise", color = colors[6])]), yticklabelrotation = -π/2)
+hidespines!(ax2)
+hidedecorations!(ax2, ticklabels = false)
+ax = Axis(fig[1:3,1], xreversed = true, yreversed = true, limits = (-180 - gap, 180 + gap, -720 - gap, 720 + gap), aspect = AxisAspect((180 + gap)/(720 + gap)), yticks = -720:180:720, xticks = -180:180:180, ylabel = "Accumulated yaw (°)", xlabel = "Initial orientation relative to intended bearing (°)")
+for (i, label) in zip([0, 1, 2, -1, -2], ["shorter rotation direction", "longer rotation direction", "additional lap", "longer rotation direction", "additional lap"])
+    ablines!(ax, 360i, -1; label, color = abs(i), colorrange = (0, 2), colormap = colors)#, linestyle = :dash)
+end
+scatter!(ax, rad2deg.(both.placed), rad2deg.(both.dance), color = (:black, 0.5))
+poly!(ax, Rect(-180 - gap/2, -720 - gap/2, 175 + gap/2, 2*720 + gap), color = (colors[4], 0.2))
+poly!(ax, Rect(5, -720 - gap/2, 180 + gap/2, 2*720 + gap), color = (colors[5], 0.2))
+poly!(ax, Rect(-180 - 0.75gap, -720 - 0.75gap, 360 + 1.5gap, 715 + 0.75gap), color = :transparent, strokecolor = colors[6], strokewidth = 2)
+poly!(ax, Rect(-180 - 0.75gap, 5, 360 + 1.5gap, 720 + 0.75gap), color = :transparent, strokecolor = colors[7], strokewidth = 2)
+Legend(fig[1,2], ax, merge = true)
+ax = Axis(fig[2,2], xlabel = "Residuals (°)", ylabel = "Counts", xticks = -180:90:180)
+hist!(ax, rad2deg.(both.residual), color = :black)
+
+Label(fig[1:3, 1,  TopLeft()], "A", fontsize = 12pt, padding = (0, 5, 5, 0), halign = :right)
+Label(fig[2, 2, TopLeft()], "B", fontsize = 12pt, padding = (0, 5, 5, 0), halign = :right)
+
+
 
 
 sdjkfhsdjfhasdklfhjl
