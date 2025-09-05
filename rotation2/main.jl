@@ -142,10 +142,10 @@ newdf.upper = 100disallowmissing(plu.upper)
 
 ax4 = Axis(row2[1,3]; xticks = 0:30:90, ylabel = "Extra lap (%)", limits)
 
-band!(ax4, newdf.elevation, newdf.lower, newdf.upper, color = :lightgray)
-lines!(newdf.elevation, newdf.prediction, color = :white)
-
 plotit!(ax4, df, :lap)
+band!(ax4, newdf.elevation, newdf.lower, newdf.upper, color = (Makie.wong_colors()[1], 0.2))
+lines!(newdf.elevation, newdf.prediction, color = Makie.wong_colors()[1])
+
 
 hideydecorations!(ax4, label = false, grid = false, minorgrid = false)
 
