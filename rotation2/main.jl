@@ -14,31 +14,34 @@ const cm = inch / 2.54
 
 set_theme!(Theme(Label = (;fontsize = 8pt), Figure = (size = (5cm, 10cm), fontsize = 8pt, fonts = (; regular = "Helvetica")), Axis = (xticksize = 3, yticksize = 3, titlesize = 8pt, titlefont = :regular, xlabelsize = 8pt, ylabelsize = 8pt, xticklabelsize = 6pt, yticklabelsize = 6pt), Legend = (labelsize = 8pt, labelfont = "Helvetica")))
 
+convert2cartesian(rad) = -rad
+# convert2cartesiand = rad2deg ∘ convert2cartesian ∘ deg2rad
 
-function get_total_rotation(start, stop, cw, fullturns)
+get_total_rotation(start, stop, cw::AbstractString, fullturns) = get_total_rotation(start, stop, cw == "cw", fullturns)
+function get_total_rotation(start, stop, cw::Bool, fullturns)
     if start < stop
         if cw 
-            stop -= (fullturns + 1)*2π #
+            stop -= (fullturns + 1)*360#2π #
         else
-            stop += fullturns*2π #
+            stop += fullturns*360#2π #
         end
     elseif start > stop
         if cw 
-            stop += fullturns*2π #
+            stop -= fullturns*360#2π #
         else
-            stop += (fullturns + 1)*2π #
+            stop += (fullturns + 1)*360#2π #
         end
     else
         throw(ArgumentError("start and stop can't be equal"))
     end
     return stop - start
 end
-
 get_total_rotation(start, stop, lastcw) = get_total_rotation(start, stop, start > stop, 0)
 
-function fix_stop_equals_start(start, stop, lastcw)
+fix_stop_equals_start(start, stop, lastcw::AbstractString) = fix_stop_equals_start(start, stop, lastcw == "cw")
+function fix_stop_equals_start(start, stop, lastcw::Bool)
     start ≠ stop && return stop
-    Δ = lastcw ? -0.01 : 0.01
+    Δ = lastcw ? -1e-9 : 1e-9
     return stop + Δ
 end
 
@@ -56,29 +59,75 @@ function plotit!(ax, df, column)
     end
 end
 
+get_residual(placed, dance, cw::AbstractString) = get_residual(placed, dance, cw == "cw")
+function get_residual(placed, dance, cw::Bool)
+    intercepts = (-2:2)*360#2π
+    intendeds = -placed .+ intercepts
+    residuals = dance .- intendeds
+    _, i = findmin(abs, residuals)
+    (-1) ^ cw * residuals[i]
+end
 
 
+# condition               elevation               exit_angle_BUTT
+# full_lap_1              full_lap_2              full_lap_3
+# go_down_angle_FACE      index                   individual
+# nr_direction_changes    nr_in_cond              person_extracted
+# placed_from_angle_FACE  rotation_1_direction    rotation_2_direction
+# rotation_3_direction    rotation_category       stop_1_angle_FACE
+# stop_2_angle_FACE       stop_3_angle_FACE       total_rotation
+# year_extracted
 
 df = @chain "rotation_elevation_compiled.csv" begin
-    CSV.read(DataFrame; missingstring = ["", "NA"])
+    CSV.read(DataFrame; missingstring = ["", "NA"], select = ["elevation",
+                                                              "condition",
+                                                              "total_rotation",
+                                                              "person_extracted",
+                                                              "go_down_angle_FACE",
+                                                              "individual",
+                                                              "exit_angle_BUTT",
+                                                              "full_lap_1",
+                                                              "full_lap_2",
+                                                              "full_lap_3",
+                                                              "nr_direction_changes",
+                                                              "placed_from_angle_FACE",
+                                                              "rotation_1_direction",
+                                                              "rotation_2_direction",
+                                                              "rotation_3_direction",
+                                                              "rotation_category",
+                                                              "stop_1_angle_FACE",
+                                                              "stop_2_angle_FACE",
+                                                              "stop_3_angle_FACE"])
+    @rename begin
+        :id = $"individual"
+        :placed = $"placed_from_angle_FACE"
+        # :direction = $"rotation_1_direction"
+        :category = $"rotation_category"
+        :exit = $"exit_angle_BUTT"
+        :down = $"go_down_angle_FACE"
+        :total = $"total_rotation"
+    end
+    # @transform :total = 360 .- :total
     @aside begin @chain _ begin
             @subset :condition .== "dark"
-            dropmissing(:total_rotation)
+            @select :total
+            dropmissing(:total)
             dark = _
         end
     end
     @subset :person_extracted .== "Elin" :condition .== "LED"
-    @select Not(:condition, :index, :nr_in_cond, :person_extracted, :year_extracted)
-    dropmissing(:go_down_angle_FACE)
-    dropmissing(:individual)
-    disallowmissing!(Cols(:elevation, :exit_angle_BUTT, :full_lap_1, :go_down_angle_FACE, :individual, :nr_direction_changes, :placed_from_angle_FACE, :rotation_1_direction, :rotation_category, :stop_1_angle_FACE, :total_rotation))
+    @select Not(:condition, :person_extracted)
+    # dropmissing(:id)
+    dropmissing(:down)
+    # disallowmissing!(Cols(:elevation, :exit, :full_lap_1, :down, :nr_direction_changes, :placed, :rotation_1_direction, :category, :stop_1_angle_FACE, :total))
+    disallowmissing!(Cols(:elevation, :exit, :full_lap_1, :down, :id, :nr_direction_changes, :placed, :rotation_1_direction, :category, :stop_1_angle_FACE, :total))
     @aside begin
-        @assert all(∈(("cw", "ccw", "both")), _.rotation_category)
+        @assert all(∈(("cw", "ccw", "both")), _.category)
         for col in (:rotation_1_direction, :rotation_2_direction, :rotation_3_direction)
             @assert all(∈(("cw", "ccw")), skipmissing(_[!, col]))
         end
-        @assert all(==("both"), @subset(_, :nr_direction_changes .> 0).rotation_category)
-        @assert all(>(0), @subset(_, :rotation_category .== "both").nr_direction_changes)
+        @assert all(==("both"), @subset(_, :nr_direction_changes .> 0).category)
+        @assert all(>(0), @subset(_, :category .== "both").nr_direction_changes)
         @assert all(ismissing, @subset(_, ismissing.(:stop_2_angle_FACE)).full_lap_2)
         @assert all(ismissing, @subset(_, ismissing.(:full_lap_2)).stop_2_angle_FACE)
         @assert all(ismissing, @subset(_, ismissing.(:stop_3_angle_FACE)).full_lap_3)
@@ -88,16 +137,56 @@ df = @chain "rotation_elevation_compiled.csv" begin
         @assert all(!ismissing, @subset(_, .!ismissing.(:stop_3_angle_FACE)).full_lap_3)
         @assert all(!ismissing, @subset(_, .!ismissing.(:full_lap_3)).stop_3_angle_FACE)
     end
+    @aside tbl = copy(_)
+    # transform([:exit, :down, :placed, :stop_1_angle_FACE, :stop_2_angle_FACE, :stop_3_angle_FACE, :total] .=> ByRow(passmissing(deg2rad)); renamecols = false)
+    transform([:exit, :down, :placed, :stop_1_angle_FACE, :stop_2_angle_FACE, :stop_3_angle_FACE] .=> ByRow(passmissing(convert2cartesian)); renamecols = false)
     @transform :cw = :rotation_1_direction .== "cw"
-    transform([:exit_angle_BUTT, :go_down_angle_FACE, :placed_from_angle_FACE, :stop_1_angle_FACE, :stop_2_angle_FACE, :stop_3_angle_FACE, :total_rotation] .=> ByRow(passmissing(deg2rad)); renamecols = false)
-    @transform :go_down_angle_FACE = fix_stop_equals_start.(:placed_from_angle_FACE, :go_down_angle_FACE, :cw)
-    @transform :placed2down = get_total_rotation.(:placed_from_angle_FACE, :go_down_angle_FACE, :cw, :full_lap_1)
-    @transform :placed_from_left = sign.(:placed_from_angle_FACE .- :go_down_angle_FACE) .> 0
-    @transform :shorter_direction = :placed_from_left .== :cw
+
+    @transform :stop_1_angle_FACE = fix_stop_equals_start.(:placed, :stop_1_angle_FACE, :rotation_1_direction)
+    @transform :dance1 = get_total_rotation.(:placed, :stop_1_angle_FACE, :rotation_1_direction, :full_lap_1)
+
+    @transform :stop_2_angle_FACE = passmissing(fix_stop_equals_start).(:stop_1_angle_FACE, :stop_2_angle_FACE, :rotation_2_direction)
+    @transform :dance2 = passmissing(get_total_rotation).(:stop_1_angle_FACE, :stop_2_angle_FACE, :rotation_2_direction, :full_lap_2)
+
+    @transform :stop_3_angle_FACE = passmissing(fix_stop_equals_start).(:stop_2_angle_FACE, :stop_3_angle_FACE, :rotation_3_direction)
+    @transform :dance3 = passmissing(get_total_rotation).(:stop_2_angle_FACE, :stop_3_angle_FACE, :rotation_3_direction, :full_lap_3)
+
+    @aside @assert all(select(select(_, r"dance" => ByRow((xs...) -> sum(abs, skipmissing(xs))) => :total2, :total), All() => ByRow(≈) => :same).same)
+
+    # @transform :down = fix_stop_equals_start.(:placed, :down, :cw)
+    # @transform :placed2down = get_total_rotation.(:placed, :down, :cw, :full_lap_1)
+    # @transform :placed_from_left = sign.(:placed .- :down) .> 0
+    @transform :shorter_direction = (sign.(:placed .- :down) .> 0) .== :cw
     @rtransform! :lap = :full_lap_1 > 0 || coalesce(:full_lap_2, 0) > 0 || coalesce(:full_lap_3, 0) > 0
     @transform :changed_direction = :nr_direction_changes .> 0
+    # @transform :residual = get_residual.(:placed, :placed2down, :cw)
+    # @rtransform :direction = (:placed .> 0) == :cw ? "shorter" : "longer" 
+    # @transform :residual_magnitude = ifelse.(:direction .== "longer", -:residual, :residual)
 end
 
+
+GLMakie.activate!()
+
+
+
+using CategoricalArrays
+
+df2 = @transform df :absplaced = abs.(rad2deg.(rem2pi.(:placed, RoundNearest)))
+fmt(from, to, i; leftclosed, rightclosed) = (from + to)/2
+@transform! df2 :placed_bin = cut(:absplaced, range(0, 180, 10), labels = fmt)
+
+@transform! groupby(df2, :placed_bin) :nlapped = count(:lap)
+
+data(df2) * mapping(:placed_bin, :nlapped, row = :elevation) * visual(Scatter) |> draw()
+
+m = glm(@formula(lap ~ absplaced*elevation), df2, Binomial())
+
+
+
+
+
+
+# GLMakie.activate!()
 
 fig = Figure(size = (12cm, 11cm))
 row1 = fig[1,1] = GridLayout()
@@ -105,9 +194,9 @@ xlimits = (-5, 95)
 width = 5
 relative = 0.1
 ax11 = Axis(row1[1,1], ylabel = "Absolut total rotation (°)", xticks = 0:30:90, yticks = 0:180:2000, limits = (xlimits, nothing))
-boxplot!(ax11, df.elevation, rad2deg.(df.total_rotation); width, color = :gray, show_outliers = false)
+boxplot!(ax11, df.elevation, df.total; width, color = :gray, show_outliers = false)
 ax12 = Axis(row1[1,2], yticks = 0:180:2000, limits = (xlimits, nothing), xticks = ([45], ["dark"]))
-boxplot!(ax12, 45ones(nrow(dark)), dark.total_rotation; width = width/relative, color = :gray, show_outliers = false)
+boxplot!(ax12, 45ones(nrow(dark)), dark.total; width = width/relative, color = :gray, show_outliers = false)
 linkyaxes!(ax11, ax12)
 hidexdecorations!(ax12, ticklabels = false, ticks = false)
 hideydecorations!(ax12, grid = false, minorgrid = false)
@@ -129,7 +218,6 @@ plotit!(ax3, df, :changed_direction)
 hideydecorations!(ax3, label = false, grid = false, minorgrid = false)
 
 linkaxes!(ax3, ax2)
-
 
 m = glm(@formula(lap ~ elevation), df, Binomial())
 
@@ -236,14 +324,14 @@ save("figure.pdf", fig)
 #
 #
 #
-# df2 = combine(groupby(df, [:elevation, :individual]), r"full_lap" => ((xs...) -> Ref(only.(xs))) => [:one, :two, :three])
+# df2 = combine(groupby(df, [:elevation, :id]), r"full_lap" => ((xs...) -> Ref(only.(xs))) => [:one, :two, :three])
 # df3 = @rsubset df2 !iszero(coalesce(:one, 0)) || !iszero(coalesce(:two, 0)) || !iszero(coalesce(:three, 0))
 #
 # @show df3
 #
 # @rtransform! df2 :lap = (coalesce(:one, 0) + coalesce(:two, 0) + coalesce(:three, 0)) > 0
 #
-# @select! df2 Not(:individual, :one, :two, :three)
+# @select! df2 Not(:id, :one, :two, :three)
 #
 # CSV.write("binomial data.csv", df2)
 #
@@ -281,12 +369,12 @@ save("figure.pdf", fig)
 #
 #
 #
-# # df2 = combine(groupby(df, [:elevation, :individual]), Cols(r"full_lap", r"stop_") => ((f1, f2, f3, s1, s2, s3) -> Ref((; one = only(xs[1]), two = only(xs[2])))) => [:one, :two])
+# # df2 = combine(groupby(df, [:elevation, :id]), Cols(r"full_lap", r"stop_") => ((f1, f2, f3, s1, s2, s3) -> Ref((; one = only(xs[1]), two = only(xs[2])))) => [:one, :two])
 #
 # df2 = transform(df, Cols(r"full_lap") .=> ByRow(x -> coalesce(x, 0)), renamecols = false)
-# df2 = combine(groupby(df2, [:elevation, :individual]), r"full_lap" => ((xs...) -> Ref((; one = only(xs[1]), two = only(xs[2])))) => [:one, :two])
+# df2 = combine(groupby(df2, [:elevation, :id]), r"full_lap" => ((xs...) -> Ref((; one = only(xs[1]), two = only(xs[2])))) => [:one, :two])
 # @rsubset! df2 !iszero(:one) || !iszero(:two) 
-# select!(df2, Not(:individual))
+# select!(df2, Not(:id))
 # sort!(df2, [:elevation, :one, :two])
 # transform!(groupby(df2, :elevation), :elevation => (xs -> 1:length(xs)) => :y)
 #
@@ -318,7 +406,7 @@ save("figure.pdf", fig)
 #
 #
 # # df2 = transform(df, Cols(r"full_lap") .=> ByRow(x -> coalesce(x, 0)), renamecols = false)
-# # df2 = combine(groupby(df2, [:elevation, :individual]), r"full_lap" => ((xs...) -> any(>(0), only.(xs))) => :one)
+# # df2 = combine(groupby(df2, [:elevation, :id]), r"full_lap" => ((xs...) -> any(>(0), only.(xs))) => :one)
 # # # sort!(df2, [:elevation, :one], rev = [false, true])
 # # df2 = combine(groupby(df2, :elevation), :one => count => :lap, :one => length => :n)
 # # @transform! df2 :proportion_lap = round.(Int, 100 .* :lap ./ :n)
@@ -339,7 +427,7 @@ save("figure.pdf", fig)
 # #
 # #
 # #
-# # transform!(groupby(df2, :elevation), :individual => (xs -> 1:length(xs)) => :y)
+# # transform!(groupby(df2, :elevation), :id => (xs -> 1:length(xs)) => :y)
 # #
 # # fig = Figure()
 # # ax = Axis(fig[1,1])

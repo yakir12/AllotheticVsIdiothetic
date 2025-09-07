@@ -17,6 +17,8 @@ set_theme!(Theme(Figure = (size = (5cm, 10cm), fontsize = 8pt, fonts = (; regula
 
 # rm.(filter(==(".png") ∘ last ∘ splitext, readdir()))
 
+convert2cartesian(rad) = -rad
+
 function get_rotation(start, stop, cw, fullturns)
     if start < stop
         if cw 
@@ -26,7 +28,7 @@ function get_rotation(start, stop, cw, fullturns)
         end
     elseif start > stop
         if cw 
-            stop += fullturns*2π #
+            stop -= fullturns*2π #
         else
             stop += (fullturns + 1)*2π #
         end
@@ -74,6 +76,9 @@ df = @chain "data.csv" begin
         :lap = $"full lap"
         :total = $"total absolute degrees of rotation"
     end
+    @aside @assert all(c -> all(0 .≤ _[!,c] .≤ 360), [:placed, :exit, :down])
+    transform([:placed, :exit, :down] .=> ByRow(convert2cartesian), renamecols = false)
+    @aside org = copy(_)
     @aside begin @chain _ begin
             @groupby :id
             @select :n = 1:length(:down) :id :total
@@ -83,13 +88,13 @@ df = @chain "data.csv" begin
     @aside both = _
     @rsubset :category ∈ ("cw", "ccw")
     @aside @assert all(_.direction .== _.category)
-    @select Not(:category)
-    @aside @assert all(c -> all(0 .≤ _[!,c] .≤ 360), [:placed, :exit, :down])
+    # @select Not(:category)
     # transform([:placed, :exit, :down] .=> ByRow(x -> x - 180), renamecols = false)
     transform([:placed, :exit, :down] .=> ByRow(deg2rad), renamecols = false)
     @select :cw = :direction .== "cw" Not(:direction)
     @aside @assert all(_.placed .≠ _.down)
-    @select :dance = get_rotation.(:placed, :down, :cw, :lap) Not(:lap)
+    # @select :dance = get_rotation.(:placed, :down, :cw, :lap) Not(:lap)
+    @transform :dance = get_rotation.(:placed, :down, :cw, :lap)
     @aside @assert all((sign.(_.dance) .< 0) .== _.cw)
     @aside @assert all(isapprox.(rem2pi.(_.placed .+ _.dance .- _.down, RoundNearest), 0, atol = 1e-10))
     @transform :exit = fix_stop_equals_start.(:down, :exit, :cw)
@@ -126,12 +131,13 @@ example_individual = 24
 
 colors = reverse(Makie.wong_colors())
 gap = 40
+max_y = rad2deg(maximum(abs, df.dance))
 fig = Figure(size = (12cm, 12cm))
-ax2 = Axis(fig[1:3,1]; reversing..., limits = (-180 - gap, 180 + gap, -720 - gap, 720 + gap), aspect = AxisAspect((180 + gap)/(720 + gap)), xaxisposition = :top, yaxisposition = :right, xticks = ([-90, 90], [rich("Right", color = colors[5]), rich("Left", color = colors[4])]), yticks = ([-360, 360], [rich("Clockwise", color = colors[7]), rich("Counterclockwise", color = colors[6])]), yticklabelrotation = -π/2)
+ax2 = Axis(fig[1:3,1]; reversing..., limits = (-180 - gap, 180 + gap, -max_y - gap, max_y + gap), aspect = AxisAspect((180 + gap)/(max_y + gap)), xaxisposition = :top, yaxisposition = :right, xticks = ([-90, 90], [rich("Right", color = colors[5]), rich("Left", color = colors[4])]), yticks = (max_y ./ [-2, 2], [rich("Clockwise", color = colors[7]), rich("Counterclockwise", color = colors[6])]), yticklabelrotation = -π/2)
 hidespines!(ax2)
 hidedecorations!(ax2, ticklabels = false)
-ax = Axis(fig[1:3,1]; reversing..., limits = (-180 - gap, 180 + gap, -720 - gap, 720 + gap), aspect = AxisAspect((180 + gap)/(720 + gap)), yticks = -720:180:720, xticks = -180:180:180, ylabel = "Total rotation (°)", xlabel = "Initial orientation relative to intended bearing (°)")
-for (i, label) in zip([0, 1, 2, -1, -2], ["shorter rotation direction", "longer rotation direction", "additional lap", "longer rotation direction", "additional lap"])
+ax = Axis(fig[1:3,1]; reversing..., limits = (-180 - gap, 180 + gap, -max_y - gap, max_y + gap), aspect = AxisAspect((180 + gap)/(max_y + gap)), yticks = -720:180:720, xticks = -180:180:180, ylabel = "Total rotation (°)", xlabel = "Initial orientation relative to intended bearing (°)")
+for (i, label) in zip([0, 1, -1], ["shorter rotation direction", "longer rotation direction", "longer rotation direction"])
     ablines!(ax, 360i, -1; label, color = abs(i), colorrange = (0, 2), colormap = colors)#, linestyle = :dash)
 end
 _df = @subset df :id .≠ example_individual
@@ -140,10 +146,10 @@ scatter!(ax, _df.placed, _df.dance, color = (:black, 0.5))
 _df = @subset df :id .== example_individual
 transform!(_df, [:placed, :dance] .=> ByRow(rad2deg), renamecols = false)
 scatter!(ax, _df.placed, _df.dance, color = (:red, 0.5))
-poly!(ax, Rect(-180 - gap/2, -720 - gap/2, 175 + gap/2, 2*720 + gap), color = (colors[4], 0.2))
-poly!(ax, Rect(5, -720 - gap/2, 180 + gap/2, 2*720 + gap), color = (colors[5], 0.2))
-poly!(ax, Rect(-180 - 0.75gap, -720 - 0.75gap, 360 + 1.5gap, 715 + 0.75gap), color = :transparent, strokecolor = colors[6], strokewidth = 2)
-poly!(ax, Rect(-180 - 0.75gap, 5, 360 + 1.5gap, 715 + 0.75gap), color = :transparent, strokecolor = colors[7], strokewidth = 2)
+poly!(ax, Rect(-180 - gap/2, -max_y - gap/2, 175 + gap/2, 2*max_y + gap), color = (colors[5], 0.2))
+poly!(ax, Rect(5, -max_y - gap/2, 180 + gap/2, 2*max_y + gap), color = (colors[4], 0.2))
+poly!(ax, Rect(-180 - 0.75gap, -max_y - 0.75gap, 360 + 1.5gap, max_y - 5 + 0.75gap), color = :transparent, strokecolor = colors[7], strokewidth = 2)
+poly!(ax, Rect(-180 - 0.75gap, 5, 360 + 1.5gap, max_y - 5 + 0.75gap), color = :transparent, strokecolor = colors[6], strokewidth = 2)
 Legend(fig[1,2], ax, merge = true)
 ax = Axis(fig[2,2], xlabel = "Residuals (°)", ylabel = "Counts", xticks = -180:90:180)
 hist!(ax, rad2deg.(df.residual_magnitude), color = :black)
@@ -236,12 +242,10 @@ end
 
 
 
-# GLMakie.activate!()
 
 both = @chain both begin
     @rsubset :category == "both"
     @select Not(:category)
-    @aside @assert all(c -> all(0 .≤ _[!,c] .≤ 360), [:placed, :exit, :down])
     # transform([:placed, :exit, :down] .=> ByRow(x -> x - 180), renamecols = false)
     transform([:placed, :exit, :down] .=> ByRow(deg2rad), renamecols = false)
     @select :cw = :direction .== "cw" Not(:direction)
@@ -261,29 +265,75 @@ both = @chain both begin
 end
 
 fig = Figure(size = (12cm, 12cm))
-ax2 = Axis(fig[1,1]; reversing..., limits = (-180 - gap, 180 + gap, -720 - gap, 720 + gap), aspect = AxisAspect((180 + gap)/(720 + gap)), xaxisposition = :top, yaxisposition = :right, xticks = ([-90, 90], [rich("Right", color = colors[5]), rich("Left", color = colors[4])]), yticks = ([-360, 360], [rich("Clockwise", color = colors[7]), rich("Counterclockwise", color = colors[6])]), yticklabelrotation = -π/2)
+ax2 = Axis(fig[1,1]; reversing..., limits = (-180 - gap, 180 + gap, -max_y - gap, max_y + gap), aspect = AxisAspect((180 + gap)/(max_y + gap)), xaxisposition = :top, yaxisposition = :right, xticks = ([-90, 90], [rich("Right", color = colors[5]), rich("Left", color = colors[4])]), yticks = (max_y ./ [-2, 2], [rich("Clockwise", color = colors[7]), rich("Counterclockwise", color = colors[6])]), yticklabelrotation = -π/2)
 hidespines!(ax2)
 hidedecorations!(ax2, ticklabels = false)
-ax = Axis(fig[1,1]; reversing..., limits = (-180 - gap, 180 + gap, -720 - gap, 720 + gap), aspect = AxisAspect((180 + gap)/(720 + gap)), yticks = -720:180:720, xticks = -180:180:180, ylabel = "Total rotation (°)", xlabel = "Initial orientation relative to intended bearing (°)")
-for (i, label) in zip([0, 1, 2, -1, -2], ["shorter rotation direction", "longer rotation direction", "additional lap", "longer rotation direction", "additional lap"])
+ax = Axis(fig[1,1]; reversing..., limits = (-180 - gap, 180 + gap, -max_y - gap, max_y + gap), aspect = AxisAspect((180 + gap)/(max_y + gap)), yticks = -720:180:720, xticks = -180:180:180, ylabel = "Total rotation (°)", xlabel = "Initial orientation relative to intended bearing (°)")
+for (i, label) in zip([0, 1, -1], ["shorter rotation direction", "longer rotation direction", "longer rotation direction"])
     ablines!(ax, 360i, -1; label, color = abs(i), colorrange = (0, 2), colormap = colors)#, linestyle = :dash)
 end
 _df = transform(both, [:placed, :dance] .=> ByRow(rad2deg), renamecols = false)
 scatter!(ax, _df.placed, _df.dance, color = (:black, 0.5))
-poly!(ax, Rect(-180 - gap/2, -720 - gap/2, 175 + gap/2, 2*720 + gap), color = (colors[4], 0.2))
-poly!(ax, Rect(5, -720 - gap/2, 180 + gap/2, 2*720 + gap), color = (colors[5], 0.2))
-poly!(ax, Rect(-180 - 0.75gap, -720 - 0.75gap, 360 + 1.5gap, 715 + 0.75gap), color = :transparent, strokecolor = colors[6], strokewidth = 2)
-poly!(ax, Rect(-180 - 0.75gap, 5, 360 + 1.5gap, 715 + 0.75gap), color = :transparent, strokecolor = colors[7], strokewidth = 2)
+poly!(ax, Rect(-180 - gap/2, -max_y - gap/2, 175 + gap/2, 2*max_y + gap), color = (colors[5], 0.2))
+poly!(ax, Rect(5, -max_y - gap/2, 180 + gap/2, 2*max_y + gap), color = (colors[4], 0.2))
+poly!(ax, Rect(-180 - 0.75gap, -max_y - 0.75gap, 360 + 1.5gap, max_y - 5 + 0.75gap), color = :transparent, strokecolor = colors[7], strokewidth = 2)
+poly!(ax, Rect(-180 - 0.75gap, 5, 360 + 1.5gap, max_y - 5 + 0.75gap), color = :transparent, strokecolor = colors[6], strokewidth = 2)
 Legend(fig[1,2], ax, merge = true)
 
 save("scatter both.pdf", fig)
 
 
+using GLM
+
+using CategoricalArrays
+
+df2 = @transform df :placed = rad2deg.(abs.(:placed))
+fmt(from, to, i; leftclosed, rightclosed) = (from + to)/2
+@select! df2 begin
+    :placed
+    :placed_bin = cut(:placed, range(0, 180, 10), labels = fmt)
+    :lap = :lap .> 0
+end
+df3 = combine(groupby(df2, :placed_bin), nrow,  :lap => count => :lap)
+@transform! df3 :percent = 100*(:lap ./ :nrow)
+m = glm(@formula(lap ~ placed), df2, Binomial())
+n = 100
+newdf = DataFrame(placed = range(0, 180, n), lap = falses(n))
+plu = predict(m, newdf, interval = :confidence)
+newdf.prediction = 100disallowmissing(plu.prediction)
+newdf.lower = 100disallowmissing(plu.lower)
+newdf.upper = 100disallowmissing(plu.upper)
+GLMakie.activate!()
+band(newdf.placed, newdf.lower, newdf.upper)
+lines!(newdf.placed, newdf.prediction, color = :white)
+scatter!(unwrap.(df3.placed_bin), df3.percent)
 
 
 
+df2 = @transform org :both = :category .== "both"
+
+m = glm(@formula(both ~ placed), df2, Binomial())
 
 
+m = glm(@formula(abs(residual_magnitude) ~ placed), df, Gamma())
+
+
+
+df2 = transform(df, [:placed, :residual_magnitude] .=> ByRow(rad2deg ∘ abs), renamecols = false)
+
+m = glm(@formula(residual_magnitude ~ placed), df2, Gamma())
+m = lm(@formula(log(residual_magnitude) ~ placed), df2)
+
+n = 100
+newdf = DataFrame(placed = range(0, 180, n), lap = falses(n))
+plu = predict(m, newdf, interval = :confidence)
+newdf.prediction = disallowmissing(plu.prediction)
+newdf.lower = disallowmissing(plu.lower)
+newdf.upper = disallowmissing(plu.upper)
+GLMakie.activate!()
+band(newdf.placed, exp.(newdf.lower), exp.(newdf.upper))
+lines!(newdf.placed, exp.(newdf.prediction), color = :white)
+scatter!(df2.placed, df2.residual_magnitude)
 
 
 #

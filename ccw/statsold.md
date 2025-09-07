@@ -5,8 +5,8 @@ The residuals—defined as the difference between the expected and actual dance 
  Row │ direction  μ         σ
      │ String     Float64   Float64
 ─────┼──────────────────────────────
-   1 │ longer     -15.5727  51.6761
-   2 │ shorter     10.7722  35.6455
+   1 │ shorter     15.5727  51.6761
+   2 │ longer     -10.7722  35.6455
 
 An F-test assessing the null hypothesis that the two groups of residuals have equal variances revealed a significant difference in variance:
 
@@ -34,8 +34,8 @@ Two sample t-test (unequal variance)
 Population details:
     parameter of interest:   Mean difference
     value under h_0:         0
-    point estimate:          -0.459805
-    95% confidence interval: (-0.6534, -0.2662)
+    point estimate:          0.459805
+    95% confidence interval: (0.2662, 0.6534)
 
 Test summary:
     outcome with 95% confidence: reject h_0
@@ -43,7 +43,7 @@ Test summary:
 
 Details:
     number of observations:   [113,159]
-    t-statistic:              -4.6848223642655515
+    t-statistic:              4.684822364265552
     degrees of freedom:       185.51572656338445
     empirical standard error: 0.09814783349085907
 
@@ -66,12 +66,12 @@ Test summary:
 
 Details:
     number of observations:   [113,159]
-    t-statistic:              0.853660268410792
+    t-statistic:              0.8536602684107915
     degrees of freedom:       185.51572656338445
     empirical standard error: 0.09814783349085907
 
 
-This suggests that beetles overshot or undershot by approximately the same amount (mean: 12.766521236357251°, standard deviation: 43.01226310593081°). Finally, we tested whether the magnitude of the residuals differed significantly from zero using a one-sample t-test:
+This suggests that beetles overshot or undershot by approximately the same amount (mean: 12.766521236357251°, standard deviation: 43.01226310593082°). Finally, we tested whether the magnitude of the residuals differed significantly from zero using a one-sample t-test:
 
 One sample t-test
 -----------------
@@ -87,9 +87,9 @@ Test summary:
 
 Details:
     number of observations:   272
-    t-statistic:              4.895135640694421
+    t-statistic:              4.89513564069442
     degrees of freedom:       271
-    empirical standard error: 0.04551821358081968
+    empirical standard error: 0.045518213580819686
 
 
 The result confirmed that the residuals are not centered around zero—indicating that beetles significantly over- or undershot their intended goal direction.
