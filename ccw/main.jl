@@ -17,98 +17,147 @@ set_theme!(Theme(Figure = (size = (5cm, 10cm), fontsize = 8pt, fonts = (; regula
 
 # rm.(filter(==(".png") ∘ last ∘ splitext, readdir()))
 
-convert2cartesian(deg) = 180 - deg
 
-function get_rotation(start, stop, cw, fullturns)
-    if start < stop
-        if cw 
-            stop -= (fullturns + 1)*2π #
-        else
-            stop += fullturns*2π #
-        end
-    elseif start > stop
-        if cw 
-            stop -= fullturns*2π #
-        else
-            stop += (fullturns + 1)*2π #
-        end
-    else
-        throw(ArgumentError("start and stop can't be equal"))
+function angular_distance(θ₁, θ₂)
+    Δ = θ₂ - θ₁
+    mod(Δ, 180)
+end
+
+function wrap_degrees(deg)
+    if deg > 180
+        deg -= 360
     end
-    return stop - start
+    return deg
 end
 
-get_rotation(start, stop, lastcw) = get_rotation(start, stop, start > stop, 0)
-
-function fix_stop_equals_start(start, stop, lastcw)
-    start ≠ stop && return stop
-    Δ = lastcw ? -0.01 : 0.01
-    return stop + Δ
+function normalize_angle(degrees)
+    normalized = degrees % 360
+    if normalized < 0
+        normalized += 360
+    end
+    return normalized
 end
 
-angular_mean(θs) = angle(sum(exp, 1im*θs))
-
-function get_residual(placed, dance, cw)
-    intercepts = (-2:2)*2π
-    intendeds = -placed .+ intercepts
-    residuals = dance .- intendeds
-    _, i = findmin(abs, residuals)
-    (-1) ^ cw * residuals[i]
+function get_total_rotation(start, stop, clockwise, turns)
+    Δ = stop - start
+    if Δ > 180
+        Δ -= 360
+    elseif Δ < -180
+        Δ += 360
+    end
+    if clockwise
+        if Δ < 0
+            Δ += 360
+        end
+        Δ += 360turns
+    else
+        if Δ > 0
+            Δ -= 360
+        end
+        Δ -= 360turns
+    end
+    return Δ
 end
 
-df = @chain "data.csv" begin
+
+function get_residual(ϵ, clockwise)
+    clockwise || return -ϵ
+    return ϵ
+end
+
+convert2lap(x) = abs(x) ÷ 360
+
+angular_mean(deg) = atand(mean(sind, deg), mean(cosd, deg))
+
+df = @chain "repeated_dances.csv" begin
     CSV.read(DataFrame; select = ["individual_number",
                                   "placed from angle (degrees)",
                                   "rotation 1 direction",
+                                  "rotation 2 direction",
+                                  "rotation 3 direction",
+                                  "angle before direction change 1 (degrees)",
+                                  "angle before direction change 2 (degrees)",
+                                  "rotation 1 full lap? (degrees)",
+                                  "rotation 2 full lap? (degrees)",
+                                  "rotation 3 full lap? (degrees)",
                                   "rotation category measured",
                                   "exit angle (degrees)",
                                   "go down angle (degrees)",
-                                  "full lap",
-                                  "n",
-                                  "total absolute degrees of rotation"])
+                                  "total absolute degrees of rotation",
+                                  "index"])
     @rename begin
         :id = $"individual_number"
         :placed = $"placed from angle (degrees)"
-        :direction = $"rotation 1 direction"
         :category = $"rotation category measured"
         :exit = $"exit angle (degrees)"
         :down = $"go down angle (degrees)"
-        :lap = $"full lap"
-        :total = $"total absolute degrees of rotation"
+        :abs_total = $"total absolute degrees of rotation"
+        :rotation_1_direction = $"rotation 1 direction"
+        :rotation_2_direction = $"rotation 2 direction"
+        :rotation_3_direction = $"rotation 3 direction"
+        :stop_1_angle = $"angle before direction change 1 (degrees)"
+        :stop_2_angle = $"angle before direction change 2 (degrees)"
     end
-    @aside @assert all(c -> all(0 .≤ _[!,c] .≤ 360), [:placed, :exit, :down])
-    transform([:placed, :exit, :down] .=> ByRow(convert2cartesian), renamecols = false)
-    # @transform :placed = :placed .+ 180
-    @aside org = copy(_)
-    @aside begin @chain _ begin
-            @groupby :id
-            @select :n = 1:length(:down) :id :total
-            trial_number = _
+    @aside @assert all(∈(-720:360:720), skipmissing(unique(Matrix(select(_, r"full lap")))))
+    @select begin
+        :full_lap_1 = convert2lap.(coalesce.($"rotation 1 full lap? (degrees)", 0))
+        :full_lap_2 = ifelse.(ismissing.("rotation_2_direction"), missing, convert2lap.(coalesce.($"rotation 2 full lap? (degrees)", 0)))
+        :full_lap_3 = ifelse.(ismissing.("rotation_3_direction"), missing, convert2lap.(coalesce.($"rotation 3 full lap? (degrees)", 0)))
+        :stop_1_angle = coalesce.(:stop_1_angle, :down)
+        :stop_2_angle = ifelse.(ismissing.("rotation_2_direction"), missing, coalesce.(:stop_2_angle, :down))
+        :stop_3_angle = ifelse.(ismissing.("rotation_3_direction"), missing, :down)
+        Not("rotation 1 full lap? (degrees)", "rotation 2 full lap? (degrees)", "rotation 3 full lap? (degrees)")
+    end
+    @transform :full_lap_2 = ifelse.(ismissing.(:stop_2_angle), :full_lap_2, coalesce.(:full_lap_2, 0))
+    @transform :full_lap_3 = ifelse.(ismissing.(:stop_3_angle), :full_lap_3, coalesce.(:full_lap_3, 0))
+    transform(r"rotation_\d_direction" => ByRow((xs...) -> count(!ismissing, xs) - 1) => :nr_direction_changes)
+
+    dropmissing(:down)
+    disallowmissing!(Cols(:exit, :full_lap_1, :down, :id, :nr_direction_changes, :placed, :rotation_1_direction, :category, :stop_1_angle, :abs_total))
+    @aside begin
+        @assert all(∈(("cw", "ccw", "both")), _.category)
+        for col in (:rotation_1_direction, :rotation_2_direction, :rotation_3_direction)
+            @assert all(∈(("cw", "ccw")), skipmissing(_[!, col]))
         end
+        @assert all(==("both"), @subset(_, :nr_direction_changes .> 0).category)
+        @assert all(>(0), @subset(_, :category .== "both").nr_direction_changes)
+        @assert all(ismissing, @subset(_, ismissing.(:stop_2_angle)).full_lap_2)
+        @assert all(ismissing, @subset(_, ismissing.(:full_lap_2)).stop_2_angle)
+        @assert all(ismissing, @subset(_, ismissing.(:stop_3_angle)).full_lap_3)
+        @assert all(!ismissing, @subset(_, .!ismissing.(:full_lap_3)).stop_3_angle)
+        @assert all(!ismissing, @subset(_, .!ismissing.(:stop_2_angle)).full_lap_2)
+        @assert all(!ismissing, @subset(_, .!ismissing.(:full_lap_2)).stop_2_angle)
+        @assert all(!ismissing, @subset(_, .!ismissing.(:stop_3_angle)).full_lap_3)
+        @assert all(!ismissing, @subset(_, .!ismissing.(:full_lap_3)).stop_3_angle)
     end
-    @aside both = _
-    @rsubset :category ∈ ("cw", "ccw")
-    @aside @assert all(_.direction .== _.category)
-    # @select Not(:category)
-    # transform([:placed, :exit, :down] .=> ByRow(x -> x - 180), renamecols = false)
-    transform([:placed, :exit, :down] .=> ByRow(deg2rad), renamecols = false)
-    @select :cw = :direction .== "cw" Not(:direction)
-    # @transform :down = fix_stop_equals_start.(:placed, :down, :cw)
-    @aside @assert all(_.placed .≠ _.down)
-    # @select :dance = get_rotation.(:placed, :down, :cw, :lap) Not(:lap)
-    @transform :dance = get_rotation.(:placed, :down, :cw, :lap)
-    @aside @assert all((sign.(_.dance) .< 0) .== _.cw)
-    @aside @assert all(isapprox.(rem2pi.(_.placed .+ _.dance .- _.down, RoundNearest), 0, atol = 1e-10))
-    @transform :exit = fix_stop_equals_start.(:down, :exit, :cw)
-    @aside @assert all(_.exit .≠ _.down)
-    @select Not(:exit)
+
+    @transform begin
+        :cw1 = passmissing(==("cw")).(:rotation_1_direction)
+        :cw2 = passmissing(==("cw")).(:rotation_2_direction)
+        :cw3 = passmissing(==("cw")).(:rotation_3_direction)
+    end
+
+    @transform :dance1 = get_total_rotation.(:placed, :stop_1_angle, :cw1, :full_lap_1)
+    @transform :dance2 = passmissing(get_total_rotation).(:stop_1_angle, :stop_2_angle, :cw2, :full_lap_2)
+    @transform :dance3 = passmissing(get_total_rotation).(:stop_2_angle, :stop_3_angle, :cw3, :full_lap_3)
+
+    @aside @assert all(select(select(_, r"dance" => ByRow((xs...) -> sum(abs, skipmissing(xs))) => :abs_total2, :abs_total), All() => ByRow(==) => :same).same)
+
+    @aside @assert all(select(select(_, Cols(r"dance", :placed) => ByRow((xs...) -> normalize_angle(sum(skipmissing(xs)))) => :down2, :down), All() => ByRow(==) => :same).same)
+
+    transform(r"dance" => ByRow((xs...) -> sum(skipmissing(xs))) => :total_dance) 
+    transform(r"full_lap_" => ByRow((xs...) -> sum(skipmissing(xs))) => :lap) 
+
     @groupby :id
-    @select :mean_down = angular_mean(:down) :n = 1:length(:down) Not(:down)
-    @select :placed = rem2pi.(:placed .- :mean_down, RoundNearest) Not(:mean_down)
-    @rtransform :direction = (:placed .> 0) == :cw ? "shorter" : "longer" 
-    @transform :residual = get_residual.(:placed, :dance, :cw)
-    @transform :residual_magnitude = ifelse.(:direction .== "longer", -:residual, :residual)
+    @transform :mean_down = angular_mean(:down) :n = 1:length(:down)
+    @transform :placed = wrap_degrees.(:placed .- :mean_down)
+    @transform :down = wrap_degrees.(:down .- :mean_down) 
+    @rtransform :direction1 = (:placed .< 0) == :cw1 ? "shorter" : "longer" 
+    @transform :residual1 = get_residual.(:down, :cw1)
+    @transform :residual_magnitude1 = ifelse.(:direction1 .== "longer", -:residual1, :residual1)
+
 end
+
 
 
 # using MixedModels
@@ -127,39 +176,41 @@ end
 
 # (pregrouped([0], [1]) * visual(ABLines; color = :gray) + data(corr) * mapping(:exit => rad2deg => "Mean exit (°)", :down => rad2deg => "Mean down (°)", color = :id => nonnumeric) * visual(Scatter)) |> draw(; axis = (; xticks = -180:90:180, yticks = -180:90:180, aspect = DataAspect()))
 
-reversing = (; xreversed = true, yreversed = true)
+notboth = @subset df :category .≠ "both"
+
+reversing = (; xreversed = false, yreversed = false)
 
 example_individual = 24
 
 colors = reverse(Makie.wong_colors())
 gap = 40
-max_y = rad2deg(maximum(abs, df.dance))
+max_y = maximum(abs, notboth.dance1)
 fig = Figure(size = (12cm, 12cm))
-ax2 = Axis(fig[1:3,1]; reversing..., limits = (-180 - gap, 180 + gap, -max_y - gap, max_y + gap), aspect = AxisAspect((180 + gap)/(max_y + gap)), xaxisposition = :top, yaxisposition = :right, xticks = ([-90, 90], [rich("Right", color = colors[5]), rich("Left", color = colors[4])]), yticks = (max_y ./ [-2, 2], [rich("Clockwise", color = colors[7]), rich("Counterclockwise", color = colors[6])]), yticklabelrotation = -π/2)
+ax2 = Axis(fig[1:3,1]; reversing..., limits = (-180 - gap, 180 + gap, -max_y - gap, max_y + gap), aspect = AxisAspect((180 + gap)/(max_y + gap)), xaxisposition = :top, yaxisposition = :right, xticks = ([-90, 90], [rich("Left", color = colors[5]), rich("Right", color = colors[4])]), yticks = (max_y ./ [-2, 2], [rich("Counterclockwise", color = colors[7]), rich("Clockwise", color = colors[6])]), yticklabelrotation = -π/2)
 hidespines!(ax2)
 hidedecorations!(ax2, ticklabels = false)
 ax = Axis(fig[1:3,1]; reversing..., limits = (-180 - gap, 180 + gap, -max_y - gap, max_y + gap), aspect = AxisAspect((180 + gap)/(max_y + gap)), yticks = -720:180:720, xticks = -180:180:180, ylabel = "Total rotation (°)", xlabel = "Initial orientation relative to intended bearing (°)")
 for (i, label) in zip([0, 1, -1], ["shorter rotation direction", "longer rotation direction", "longer rotation direction"])
     ablines!(ax, 360i, -1; label, color = abs(i), colorrange = (0, 2), colormap = colors)#, linestyle = :dash)
 end
-_df = @subset df :id .≠ example_individual
-transform!(_df, [:placed, :dance] .=> ByRow(rad2deg), renamecols = false)
-scatter!(ax, _df.placed, _df.dance, color = (:black, 0.5))
-_df = @subset df :id .== example_individual
-transform!(_df, [:placed, :dance] .=> ByRow(rad2deg), renamecols = false)
-scatter!(ax, _df.placed, _df.dance, color = (:red, 0.5))
+_df = @subset notboth :id .≠ example_individual
+scatter!(ax, _df.placed, _df.dance1, color = (:black, 0.5))
+_df = @subset notboth :id .== example_individual
+scatter!(ax, _df.placed, _df.dance1, color = (:red, 0.5))
+# _df = @subset notboth :lap .> 0
+# scatter!(ax, _df.placed, _df.dance1, color = :transparent, markersize = 20, strokecolor = :red, strokewidth = 1)
 poly!(ax, Rect(-180 - gap/2, -max_y - gap/2, 175 + gap/2, 2*max_y + gap), color = (colors[5], 0.2))
 poly!(ax, Rect(5, -max_y - gap/2, 180 + gap/2, 2*max_y + gap), color = (colors[4], 0.2))
 poly!(ax, Rect(-180 - 0.75gap, -max_y - 0.75gap, 360 + 1.5gap, max_y - 5 + 0.75gap), color = :transparent, strokecolor = colors[7], strokewidth = 2)
 poly!(ax, Rect(-180 - 0.75gap, 5, 360 + 1.5gap, max_y - 5 + 0.75gap), color = :transparent, strokecolor = colors[6], strokewidth = 2)
 Legend(fig[1,2], ax, merge = true)
 ax = Axis(fig[2,2], xlabel = "Residuals (°)", ylabel = "Counts", xticks = -180:90:180)
-hist!(ax, rad2deg.(df.residual_magnitude), color = :black)
+hist!(ax, notboth.residual_magnitude1, color = :black)
 ax = Axis(fig[3,2], xlabel = "Sequential rotation events", ylabel = "Absolute total rotation (°)", yticks = 0:180:1000)
-for g in groupby(trial_number, :id)
-    lines!(ax, g.n, g.total, color = (:black, 0.1))
+for g in groupby(df, :id)
+    lines!(ax, g.n, g.abs_total, color = (:black, 0.1))
 end
-boxplot!(ax, trial_number.n, trial_number.total, color = :gray)
+boxplot!(ax, df.n, df.abs_total, color = :gray)
 
 Label(fig[1:3, 1,  TopLeft()], "A", fontsize = 12pt, padding = (0, 5, 5, 0), halign = :right)
 Label(fig[2, 2, TopLeft()], "B", fontsize = 12pt, padding = (0, 5, 5, 0), halign = :right)
@@ -176,8 +227,8 @@ save("scatter.pdf", fig)
 
 # GLMakie.activate!()
 fig = Figure(size = (10cm, 20cm))
-xy = data(subset(df, :id => ByRow(≠(example_individual)))) * mapping(:placed => rad2deg, :dance => rad2deg, layout = :id => nonnumeric) * visual(Scatter; color = (:black, 0.5))
-xy42 = data(subset(df, :id => ByRow(==(example_individual)))) * mapping(:placed => rad2deg, :dance => rad2deg, layout = :id => nonnumeric) * visual(Scatter; color = (:red, 0.5))
+xy = data(subset(notboth, :id => ByRow(≠(example_individual)))) * mapping(:placed, :dance1, layout = :id => nonnumeric) * visual(Scatter; color = (:black, 0.5))
+xy42 = data(subset(notboth, :id => ByRow(==(example_individual)))) * mapping(:placed, :dance1, layout = :id => nonnumeric) * visual(Scatter; color = (:red, 0.5))
 abline = data(DataFrame(a = 360 .* (-2:2), b = -1, color = [2,1,3,1,2])) * mapping(:a, :b, color = :color) * visual(ABLines; color = colors)
 toplot = abline + xy + xy42
 g = draw!(fig[1,1], toplot, scales(; Layout = (; legend = false) ); axis = (; reversing..., xlabel = "Initial orientation relative to intended bearing (°)", ylabel = "Total rotation (°)", xticks = [-180, 180], yticks = -720:360:720, aspect = DataAspect()))
@@ -194,27 +245,150 @@ save("inidividual relationship.png", fig)
 # data(df2) * mapping(:residual, color = :direction) * visual(Hist) |> draw()
 
 
+@subset! notboth :lap .== 0
 
-gs = groupby(df, :direction)
+gs = groupby(notboth, :direction1)
 
-df2 = combine(gs, :residual .=> [rad2deg ∘ mean, rad2deg ∘ std] .=> [:μ, :σ]) 
+df2 = combine(gs, :residual1 .=> [mean, std] .=> [:μ, :σ]) 
 
 g1, g2 = [DataFrame(g) for g in gs]
 
-vartest = VarianceFTest(g1.residual, g2.residual)
+vartest = VarianceFTest(g1.residual1, g2.residual1)
 
-meantest = UnequalVarianceTTest(g1.residual, g2.residual)
+meantest = UnequalVarianceTTest(g1.residual1, g2.residual1)
 
-meanmagtest = UnequalVarianceTTest(g1.residual_magnitude, g2.residual_magnitude)
+meanmagtest = UnequalVarianceTTest(g1.residual_magnitude1, g2.residual_magnitude1)
 
-df3 = DataFrame(μ = rad2deg(mean(df.residual_magnitude)), σ = rad2deg(std(df.residual_magnitude)))
+df3 = DataFrame(μ = mean(notboth.residual_magnitude1), σ = std(notboth.residual_magnitude1))
 
-t = OneSampleTTest(df.residual_magnitude)
+t = OneSampleTTest(notboth.residual_magnitude1)
 
-μ = rad2deg(mean(df.residual_magnitude))
-σ = rad2deg(std(df.residual_magnitude))
+μ = mean(notboth.residual_magnitude1)
+σ = std(notboth.residual_magnitude1)
 
-open("stats.md", "w") do io
+open("stats noboth.md", "w") do io
+    print(io, """# Summary
+          Out of a total of $(nrow(df)) runs, $(count(==("both"), df.category)) turned both directions and $(count(>(0), df.lap)) turned more than 360°. Out of the ones that didn't turn multiple times nor turned more than 360°, $(count(==("shorter"), notboth.direction1)) turned towards the shorter direction and $(count(==("longer"), notboth.direction1)) turned towards the longer direction.
+
+          The residuals—defined as the difference between the expected and actual dance directions—show the following mean and standard deviation for beetles turning in the shorter versus longer direction:
+
+          $df2
+
+          An F-test assessing the null hypothesis that the two groups of residuals have equal variances revealed a significant difference in variance:
+
+          $vartest
+
+          Given this, we applied Welch’s t-test to determine whether the group means differ significantly. The test confirmed a significant difference:
+
+          $meantest
+
+          This indicates that beetles turning in the shorter direction (i.e., placed on the left half-circle and turning clockwise, or placed on the right and turning counterclockwise) performed significantly longer dances than those turning in the longer direction—and vice versa.
+
+          To assess whether the degree of over- or undershooting differed between the dance direction groups, we used Welch’s t-test on the magnitude of the turn (ignoring direction). The result showed no significant difference:
+
+          $meanmagtest
+
+          This suggests that beetles overshot or undershot by approximately the same amount (mean: $(μ)°, standard deviation: $(σ)°). Finally, we tested whether the magnitude of the residuals differed significantly from zero using a one-sample t-test:
+
+          $t
+
+          The result confirmed that the residuals are not centered around zero—indicating that beetles significantly over- or undershot their intended goal direction.""")
+end
+
+
+
+both = @subset df :category .== "both"
+
+fig = Figure(size = (12cm, 12cm))
+ax2 = Axis(fig[1:2,1]; reversing..., limits = (-180 - gap, 180 + gap, -max_y - gap, max_y + gap), aspect = AxisAspect((180 + gap)/(max_y + gap)), xaxisposition = :top, yaxisposition = :right, xticks = ([-90, 90], [rich("Right", color = colors[5]), rich("Left", color = colors[4])]), yticks = (max_y ./ [-2, 2], [rich("Clockwise", color = colors[7]), rich("Counterclockwise", color = colors[6])]), yticklabelrotation = -π/2)
+hidespines!(ax2)
+hidedecorations!(ax2, ticklabels = false)
+ax = Axis(fig[1:2,1]; reversing..., limits = (-180 - gap, 180 + gap, -max_y - gap, max_y + gap), aspect = AxisAspect((180 + gap)/(max_y + gap)), yticks = -720:180:720, xticks = -180:180:180, ylabel = "Total rotation (°)", xlabel = "Initial orientation relative to intended bearing (°)")
+for (i, label) in zip([0, 1, -1], ["shorter rotation direction", "longer rotation direction", "longer rotation direction"])
+    ablines!(ax, 360i, -1; label, color = abs(i), colorrange = (0, 2), colormap = colors)#, linestyle = :dash)
+end
+scatter!(ax, both.placed, both.total_dance, color = (:black, 0.5))
+poly!(ax, Rect(-180 - gap/2, -max_y - gap/2, 175 + gap/2, 2*max_y + gap), color = (colors[5], 0.2))
+poly!(ax, Rect(5, -max_y - gap/2, 180 + gap/2, 2*max_y + gap), color = (colors[4], 0.2))
+poly!(ax, Rect(-180 - 0.75gap, -max_y - 0.75gap, 360 + 1.5gap, max_y - 5 + 0.75gap), color = :transparent, strokecolor = colors[7], strokewidth = 2)
+poly!(ax, Rect(-180 - 0.75gap, 5, 360 + 1.5gap, max_y - 5 + 0.75gap), color = :transparent, strokecolor = colors[6], strokewidth = 2)
+Legend(fig[1,2], ax, merge = true)
+ax = Axis(fig[2,2], xlabel = "Residuals (°)", ylabel = "Counts", xticks = -180:90:180)
+hist!(ax, both.residual_magnitude1, color = :black)
+
+save("scatter both.pdf", fig)
+
+gs = groupby(both, :direction1)
+
+df2 = combine(gs, :residual1 .=> [mean, std] .=> [:μ, :σ]) 
+
+g1, g2 = [DataFrame(g) for g in gs]
+
+vartest = VarianceFTest(g1.residual1, g2.residual1)
+
+meantest = UnequalVarianceTTest(g1.residual1, g2.residual1)
+
+meanmagtest = UnequalVarianceTTest(g1.residual_magnitude1, g2.residual_magnitude1)
+
+df3 = DataFrame(μ = mean(both.residual_magnitude1), σ = std(both.residual_magnitude1))
+
+t = OneSampleTTest(both.residual_magnitude1)
+
+μ = mean(both.residual_magnitude1)
+σ = std(both.residual_magnitude1)
+
+
+
+open("stats both.md", "w") do io
+    print(io, """# Summary
+          The residuals—defined as the difference between the expected and actual dance directions—show the following mean and standard deviation for beetles turning in the shorter versus longer direction:
+
+          $df2
+
+          An F-test assessing the null hypothesis that the two groups of residuals have equal variances revealed a significant difference in variance:
+
+          $vartest
+
+          Given this, we applied Welch’s t-test to determine whether the group means differ significantly. The test confirmed a significant difference:
+
+          $meantest
+
+          This indicates that beetles turning in the shorter direction (i.e., placed on the left half-circle and turning clockwise, or placed on the right and turning counterclockwise) performed significantly longer dances than those turning in the longer direction—and vice versa.
+
+          To assess whether the degree of over- or undershooting differed between the dance direction groups, we used Welch’s t-test on the magnitude of the turn (ignoring direction). The result showed no significant difference:
+
+          $meanmagtest
+
+          This suggests that beetles overshot or undershot by approximately the same amount (mean: $(μ)°, standard deviation: $(σ)°). Finally, we tested whether the magnitude of the residuals differed significantly from zero using a one-sample t-test:
+
+          $t
+
+          The result confirmed that the residuals are not centered around zero—indicating that beetles significantly over- or undershot their intended goal direction.""")
+end
+
+
+morelaps = @subset df :lap .> 0 :category .≠ "both"
+
+gs = groupby(morelaps, :direction1)
+
+df2 = combine(gs, :residual1 .=> [mean, std] .=> [:μ, :σ]) 
+
+g1, g2 = [DataFrame(g) for g in gs]
+
+vartest = VarianceFTest(g1.residual1, g2.residual1)
+
+meantest = UnequalVarianceTTest(g1.residual1, g2.residual1)
+
+meanmagtest = UnequalVarianceTTest(g1.residual_magnitude1, g2.residual_magnitude1)
+
+df3 = DataFrame(μ = mean(morelaps.residual_magnitude1), σ = std(morelaps.residual_magnitude1))
+
+t = OneSampleTTest(morelaps.residual_magnitude1)
+
+μ = mean(morelaps.residual_magnitude1)
+σ = std(morelaps.residual_magnitude1)
+
+open("stats morelaps.md", "w") do io
     print(io, """# Summary
           The residuals—defined as the difference between the expected and actual dance directions—show the following mean and standard deviation for beetles turning in the shorter versus longer direction:
 
@@ -245,114 +419,76 @@ end
 
 
 
-both = @chain both begin
-    @rsubset :category == "both"
-    @select Not(:category)
-    # transform([:placed, :exit, :down] .=> ByRow(x -> x - 180), renamecols = false)
-    transform([:placed, :exit, :down] .=> ByRow(deg2rad), renamecols = false)
-    @select :cw = :direction .== "cw" Not(:direction)
-    @aside @assert all(_.placed .≠ _.down)
-    @select :dance = get_rotation.(:placed, :down, :cw, :lap) Not(:lap)
-    @aside @assert all((sign.(_.dance) .< 0) .== _.cw)
-    @aside @assert all(isapprox.(rem2pi.(_.placed .+ _.dance .- _.down, RoundNearest), 0, atol = 1e-10))
-    @transform :exit = fix_stop_equals_start.(:down, :exit, :cw)
-    @aside @assert all(_.exit .≠ _.down)
-    @select Not(:exit)
-    @groupby :id
-    @select :mean_down = angular_mean(:down) :n = 1:length(:down) Not(:down)
-    @select :placed = rem2pi.(:placed .- :mean_down, RoundNearest) Not(:mean_down)
-    @rtransform :direction = (:placed .> 0) == :cw ? "shorter" : "longer" 
-    @transform :residual = get_residual.(:placed, :dance, :cw)
-    @transform :residual_magnitude = ifelse.(:direction .== "longer", -:residual, :residual)
-end
-
-fig = Figure(size = (12cm, 12cm))
-ax2 = Axis(fig[1,1]; reversing..., limits = (-180 - gap, 180 + gap, -max_y - gap, max_y + gap), aspect = AxisAspect((180 + gap)/(max_y + gap)), xaxisposition = :top, yaxisposition = :right, xticks = ([-90, 90], [rich("Right", color = colors[5]), rich("Left", color = colors[4])]), yticks = (max_y ./ [-2, 2], [rich("Clockwise", color = colors[7]), rich("Counterclockwise", color = colors[6])]), yticklabelrotation = -π/2)
-hidespines!(ax2)
-hidedecorations!(ax2, ticklabels = false)
-ax = Axis(fig[1,1]; reversing..., limits = (-180 - gap, 180 + gap, -max_y - gap, max_y + gap), aspect = AxisAspect((180 + gap)/(max_y + gap)), yticks = -720:180:720, xticks = -180:180:180, ylabel = "Total rotation (°)", xlabel = "Initial orientation relative to intended bearing (°)")
-for (i, label) in zip([0, 1, -1], ["shorter rotation direction", "longer rotation direction", "longer rotation direction"])
-    ablines!(ax, 360i, -1; label, color = abs(i), colorrange = (0, 2), colormap = colors)#, linestyle = :dash)
-end
-_df = transform(both, [:placed, :dance] .=> ByRow(rad2deg), renamecols = false)
-scatter!(ax, _df.placed, _df.dance, color = (:black, 0.5))
-poly!(ax, Rect(-180 - gap/2, -max_y - gap/2, 175 + gap/2, 2*max_y + gap), color = (colors[5], 0.2))
-poly!(ax, Rect(5, -max_y - gap/2, 180 + gap/2, 2*max_y + gap), color = (colors[4], 0.2))
-poly!(ax, Rect(-180 - 0.75gap, -max_y - 0.75gap, 360 + 1.5gap, max_y - 5 + 0.75gap), color = :transparent, strokecolor = colors[7], strokewidth = 2)
-poly!(ax, Rect(-180 - 0.75gap, 5, 360 + 1.5gap, max_y - 5 + 0.75gap), color = :transparent, strokecolor = colors[6], strokewidth = 2)
-Legend(fig[1,2], ax, merge = true)
-
-save("scatter both.pdf", fig)
 
 
-using GLM
-
-using CategoricalArrays
-
-fmt(from, to, i; leftclosed, rightclosed) = (from + to)/2
-@transform! org :absplaced = abs.(:placed)
-@transform! org begin
-    :absplaced_bin = cut(:absplaced, range(0, 180, 10), labels = fmt)
-    :lap_bool = :lap .> 0
-    :both = :category .== "both"
-end
-@transform! groupby(org, [:absplaced_bin, :category]) :lapn = count(:lap_bool)
-
-data(org) * mapping(:absplaced_bin, :lapn, row = :both) * visual(Scatter) |> draw()
-
-data(subset(org, :both)) * mapping(:absplaced_bin, :lapn) * visual(Scatter) |> draw()
-
-
-
-df2 = @transform df :placed = abs.(rad2deg.(:placed))
-fmt(from, to, i; leftclosed, rightclosed) = (from + to)/2
-@select! df2 begin
-    :placed
-    :placed_bin = cut(:placed, range(0, 180, 10), labels = fmt)
-    :lap = :lap .> 0
-end
-df3 = combine(groupby(df2, :placed_bin), nrow,  :lap => count => :lap)
-@transform! df3 :percent = 100*(:lap ./ :nrow)
-m = glm(@formula(lap ~ placed), df2, Binomial())
-
-n = 100
-newdf = DataFrame(placed = range(0, 180, n), lap = falses(n))
-plu = predict(m, newdf, interval = :confidence)
-newdf.prediction = 100disallowmissing(plu.prediction)
-newdf.lower = 100disallowmissing(plu.lower)
-newdf.upper = 100disallowmissing(plu.upper)
-GLMakie.activate!()
-band(newdf.placed, newdf.lower, newdf.upper)
-lines!(newdf.placed, newdf.prediction, color = :white)
-scatter!(unwrap.(df3.placed_bin), df3.percent)
-
-
-
-df2 = @transform org :both = :category .== "both"
-
-m = glm(@formula(both ~ placed), df2, Binomial())
-
-
-m = glm(@formula(abs(residual_magnitude) ~ placed), df, Gamma())
-
-
-
-df2 = transform(df, [:placed, :residual_magnitude] .=> ByRow(rad2deg ∘ abs), renamecols = false)
-
-m = glm(@formula(residual_magnitude ~ placed), df2, Gamma())
-m = lm(@formula(log(residual_magnitude) ~ placed), df2)
-
-n = 100
-newdf = DataFrame(placed = range(0, 180, n), lap = falses(n))
-plu = predict(m, newdf, interval = :confidence)
-newdf.prediction = disallowmissing(plu.prediction)
-newdf.lower = disallowmissing(plu.lower)
-newdf.upper = disallowmissing(plu.upper)
-GLMakie.activate!()
-band(newdf.placed, exp.(newdf.lower), exp.(newdf.upper))
-lines!(newdf.placed, exp.(newdf.prediction), color = :white)
-scatter!(df2.placed, df2.residual_magnitude)
-
+# using GLM
+#
+# using CategoricalArrays
+#
+# fmt(from, to, i; leftclosed, rightclosed) = (from + to)/2
+# @transform! df :absplaced = abs.(:placed)
+# @transform! df begin
+#     :absplaced_bin = cut(:absplaced, range(0, 180, 10), labels = fmt)
+#     :lap_bool = :lap .> 0
+#     :both = :category .== "both"
+# end
+# @transform! groupby(df, [:absplaced_bin, :category]) :lapn = count(:lap_bool)
+#
+# data(df) * mapping(:absplaced_bin, :lapn, row = :both) * visual(Scatter) |> draw()
+#
+# data(subset(df, :both)) * mapping(:absplaced_bin, :lapn) * visual(Scatter) |> draw()
+#
+#
+#
+# df2 = @transform df :placed = abs.(rad2deg.(:placed))
+# fmt(from, to, i; leftclosed, rightclosed) = (from + to)/2
+# @select! df2 begin
+#     :placed
+#     :placed_bin = cut(:placed, range(0, 180, 10), labels = fmt)
+#     :lap = :lap .> 0
+# end
+# df3 = combine(groupby(df2, :placed_bin), nrow,  :lap => count => :lap)
+# @transform! df3 :percent = 100*(:lap ./ :nrow)
+# m = glm(@formula(lap ~ placed), df2, Binomial())
+#
+# n = 100
+# newdf = DataFrame(placed = range(0, 180, n), lap = falses(n))
+# plu = predict(m, newdf, interval = :confidence)
+# newdf.prediction = 100disallowmissing(plu.prediction)
+# newdf.lower = 100disallowmissing(plu.lower)
+# newdf.upper = 100disallowmissing(plu.upper)
+# GLMakie.activate!()
+# band(newdf.placed, newdf.lower, newdf.upper)
+# lines!(newdf.placed, newdf.prediction, color = :white)
+# scatter!(unwrap.(df3.placed_bin), df3.percent)
+#
+#
+#
+# df2 = @transform df :both = :category .== "both"
+#
+# m = glm(@formula(both ~ placed), df2, Binomial())
+#
+#
+# m = glm(@formula(abs(residual_magnitude) ~ placed), df, Gamma())
+#
+#
+#
+# df2 = transform(df, [:placed, :residual_magnitude] .=> ByRow(rad2deg ∘ abs), renamecols = false)
+#
+# m = glm(@formula(residual_magnitude ~ placed), df2, Gamma())
+# m = lm(@formula(log(residual_magnitude) ~ placed), df2)
+#
+# n = 100
+# newdf = DataFrame(placed = range(0, 180, n), lap = falses(n))
+# plu = predict(m, newdf, interval = :confidence)
+# newdf.prediction = disallowmissing(plu.prediction)
+# newdf.lower = disallowmissing(plu.lower)
+# newdf.upper = disallowmissing(plu.upper)
+# GLMakie.activate!()
+# band(newdf.placed, exp.(newdf.lower), exp.(newdf.upper))
+# lines!(newdf.placed, exp.(newdf.prediction), color = :white)
+# scatter!(df2.placed, df2.residual_magnitude)
+#
 
 #
 # dfgjhsdflkhjgdlfghjsdflghjdlghj

@@ -7,12 +7,20 @@ using CairoMakie
 # using StatsBase
 using GLM
 
+cutoff = 10
 
 const pt = 4/3
 const inch = 96
 const cm = inch / 2.54
 
 set_theme!(Theme(Label = (;fontsize = 8pt), Figure = (size = (5cm, 10cm), fontsize = 8pt, fonts = (; regular = "Helvetica")), Axis = (xticksize = 3, yticksize = 3, titlesize = 8pt, titlefont = :regular, xlabelsize = 8pt, ylabelsize = 8pt, xticklabelsize = 6pt, yticklabelsize = 6pt), Legend = (labelsize = 8pt, labelfont = "Helvetica")))
+
+function angular_distance(θ₁, θ₂)
+    Δ = abs(θ₂ - θ₁)
+    Δ = mod(Δ, 360)
+    return min(Δ, 360 - Δ)
+end
+
 
 function normalize_angle(degrees)
     normalized = degrees % 360
@@ -68,7 +76,7 @@ function plotit!(ax, df, column)
         n = nrow(g)
         elevation = k.elevation
         c = g[!, column]
-        y = range(0, 100, n + 1)[1:end-1]
+        y = range(0, 1, n + 1)[1:end-1]
         h = step(y)
         for (y, c) in zip(y, c)
             poly!(ax, Rect(elevation - w*0.5, y, w, h), color = c ? :black : :transparent, strokecolor = :lightgray, strokewidth = 1)
@@ -127,7 +135,6 @@ df = @chain "rotation_elevation_compiled.csv" begin
     @select Not(:condition, :person_extracted)
     # dropmissing(:id)
     dropmissing(:down)
-    # disallowmissing!(Cols(:elevation, :exit, :full_lap_1, :down, :nr_direction_changes, :placed, :rotation_1_direction, :category, :stop_1_angle_FACE, :abs_total))
     disallowmissing!(Cols(:elevation, :exit, :full_lap_1, :down, :id, :nr_direction_changes, :placed, :rotation_1_direction, :category, :stop_1_angle_FACE, :abs_total))
     @aside begin
         @assert all(∈(("cw", "ccw", "both")), _.category)
@@ -168,32 +175,17 @@ df = @chain "rotation_elevation_compiled.csv" begin
         Not(:down)
     end
 
-    @transform :placed_from_left = :placed .< 0
+    @transform :placed_from_left = :placed .> 180
     @transform :shorter_direction1 = :placed_from_left .== :cw1
-    transform(r"full_lap" => ByRow((xs...) -> any(>(0), skipmissing(xs))) => :lap2)
+    transform(r"full_lap" => ByRow((xs...) -> any(>(0), skipmissing(xs))) => :lap)
     @transform :changed_direction = :nr_direction_changes .> 0
     @transform :residual1 = get_residual.(:placed, :dance1, :cw1)
+    @transform :too_close = angular_distance.(:placed, 0) .< cutoff
     # # @transform :residual_magnitude = ifelse.(:direction .== "longer", -:residual, :residual)
 end
 
 
-GLMakie.activate!()
 # scatter(df.exit)
-
-hist(df.placed)
-
-dshfkdshflkdsj
-
-using CategoricalArrays
-
-df2 = @transform df :absplaced = abs.(:placed .- 180)
-fmt(from, to, i; leftclosed, rightclosed) = (from + to)/2
-@transform! df2 :placed_bin = cut(:absplaced, range(0, 180, 10), labels = fmt)
-@transform! groupby(df2, [:placed_bin, :elevation]) :nlapped = count(:lap)
-
-data(df2) * mapping(:placed_bin, :nlapped, row = :elevation) * visual(Scatter) |> draw()
-
-m = glm(@formula(lap ~ absplaced*elevation), df2, Binomial())
 
 
 
@@ -208,9 +200,9 @@ xlimits = (-5, 95)
 width = 5
 relative = 0.1
 ax11 = Axis(row1[1,1], ylabel = "Absolut total rotation (°)", xticks = 0:30:90, yticks = 0:180:2000, limits = (xlimits, nothing))
-boxplot!(ax11, df.elevation, df.total; width, color = :gray, show_outliers = false)
+boxplot!(ax11, df.elevation, df.abs_total; width, color = :gray, show_outliers = false)
 ax12 = Axis(row1[1,2], yticks = 0:180:2000, limits = (xlimits, nothing), xticks = ([45], ["dark"]))
-boxplot!(ax12, 45ones(nrow(dark)), dark.total; width = width/relative, color = :gray, show_outliers = false)
+boxplot!(ax12, 45ones(nrow(dark)), dark.abs_total; width = width/relative, color = :gray, show_outliers = false)
 linkyaxes!(ax11, ax12)
 hidexdecorations!(ax12, ticklabels = false, ticks = false)
 hideydecorations!(ax12, grid = false, minorgrid = false)
@@ -220,13 +212,13 @@ colsize!(row1, 2, Relative(relative))
 row2 = fig[2,1] = GridLayout()
 
 
-limits = (nothing, (nothing, 75))
-ax2 = Axis(row2[1,1]; xticks = 0:30:90, ylabel = "Shorter direction (%)", limits)
-plotit!(ax2, df, :shorter_direction)
+limits = (nothing, (nothing, 0.74))
+ax2 = Axis(row2[1,1]; xticks = 0:30:90, yticks = 0:0.25:1, ylabel = "Proportion of population", title = "Shorter direction", limits)
+plotit!(ax2, df, :shorter_direction1)
 
 
 
-ax3 = Axis(row2[1,2]; xticks = 0:30:90, ylabel = "Direction changes (%)", limits)
+ax3 = Axis(row2[1,2]; xticks = 0:30:90, title = "Direction changes", limits)
 plotit!(ax3, df, :changed_direction)
 
 hideydecorations!(ax3, label = false, grid = false, minorgrid = false)
@@ -238,11 +230,11 @@ m = glm(@formula(lap ~ elevation), df, Binomial())
 n = 100
 newdf = DataFrame(elevation = range(0, 90, n), lap = falses(n))
 plu = predict(m, newdf, interval = :confidence)
-newdf.prediction = 100disallowmissing(plu.prediction)
-newdf.lower = 100disallowmissing(plu.lower)
-newdf.upper = 100disallowmissing(plu.upper)
+newdf.prediction = disallowmissing(plu.prediction)
+newdf.lower = disallowmissing(plu.lower)
+newdf.upper = disallowmissing(plu.upper)
 
-ax4 = Axis(row2[1,3]; xticks = 0:30:90, ylabel = "Extra lap (%)", limits)
+ax4 = Axis(row2[1,3]; xticks = 0:30:90, title = "Extra lap", limits)
 
 plotit!(ax4, df, :lap)
 band!(ax4, newdf.elevation, newdf.lower, newdf.upper, color = (Makie.wong_colors()[1], 0.2))
@@ -267,6 +259,59 @@ save("figure.png", fig)
 
 CairoMakie.activate!()
 save("figure.pdf", fig)
+
+
+
+
+
+                                                                                                                                                                   # color = :cw1 => renamer(true => "clockwise", false => "counterclockwise")
+
+# GLMakie.activate!()
+
+
+_df = @chain df begin
+    @subset :lap #.!:changed_direction
+    @select :elevation :placed :too_close :changed_direction
+end
+fig = Figure()
+ax = PolarAxis(fig[1,1], theta_0 = -π/2, rticks = sort(unique(_df.elevation)), direction = -1)
+h = []
+l = []
+for (k, g) in pairs(groupby(_df, :changed_direction))
+    _h = scatter!(ax, deg2rad.(g.placed), g.elevation, label = k.changed_direction)
+    push!(h, _h)
+    push!(l, k.changed_direction ? "changed direction" : "didn't")
+end
+@subset! _df :too_close
+c = scatter!(ax, deg2rad.(_df.placed), _df.elevation, markersize = 20, color = :transparent, strokecolor = :red, strokewidth = 1)
+Legend(fig[1,2], [h; c], [l; "too close?"])
+
+save("figure2.pdf", fig)
+
+m = glm(@formula(lap ~ elevation), df, Binomial())
+
+m = glm(@formula(lap ~ elevation), @subset(df, .!:too_close), Binomial())
+
+m = glm(@formula(lap ~ elevation), @subset(df, .!:changed_direction), Binomial())
+
+m = glm(@formula(lap ~ elevation), @subset(df, .!:changed_direction, .!:too_close), Binomial())
+
+
+m = glm(@formula(changed_direction ~ elevation), df, Binomial())
+
+m = glm(@formula(changed_direction ~ elevation), @subset(df, .!:too_close), Binomial())
+
+# using CategoricalArrays
+#
+# df2 = @transform df :absplaced = abs.(:placed .- 180)
+# fmt(from, to, i; leftclosed, rightclosed) = (from + to)/2
+# @transform! df2 :placed_bin = cut(:absplaced, range(0, 180, 10), labels = fmt)
+# @transform! groupby(df2, [:placed_bin, :elevation]) :nlapped = count(:lap)
+#
+# data(df2) * mapping(:placed_bin, :nlapped, row = :elevation) * visual(Scatter) |> draw()
+#
+# m = glm(@formula(lap ~ absplaced*elevation), df2, Binomial())
+
 
 
 
