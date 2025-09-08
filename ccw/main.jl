@@ -17,7 +17,7 @@ set_theme!(Theme(Figure = (size = (5cm, 10cm), fontsize = 8pt, fonts = (; regula
 
 # rm.(filter(==(".png") ∘ last ∘ splitext, readdir()))
 
-convert2cartesian(rad) = -rad
+convert2cartesian(deg) = 180 - deg
 
 function get_rotation(start, stop, cw, fullturns)
     if start < stop
@@ -78,6 +78,7 @@ df = @chain "data.csv" begin
     end
     @aside @assert all(c -> all(0 .≤ _[!,c] .≤ 360), [:placed, :exit, :down])
     transform([:placed, :exit, :down] .=> ByRow(convert2cartesian), renamecols = false)
+    # @transform :placed = :placed .+ 180
     @aside org = copy(_)
     @aside begin @chain _ begin
             @groupby :id
@@ -92,6 +93,7 @@ df = @chain "data.csv" begin
     # transform([:placed, :exit, :down] .=> ByRow(x -> x - 180), renamecols = false)
     transform([:placed, :exit, :down] .=> ByRow(deg2rad), renamecols = false)
     @select :cw = :direction .== "cw" Not(:direction)
+    # @transform :down = fix_stop_equals_start.(:placed, :down, :cw)
     @aside @assert all(_.placed .≠ _.down)
     # @select :dance = get_rotation.(:placed, :down, :cw, :lap) Not(:lap)
     @transform :dance = get_rotation.(:placed, :down, :cw, :lap)
@@ -287,7 +289,22 @@ using GLM
 
 using CategoricalArrays
 
-df2 = @transform df :placed = rad2deg.(abs.(:placed))
+fmt(from, to, i; leftclosed, rightclosed) = (from + to)/2
+@transform! org :absplaced = abs.(:placed)
+@transform! org begin
+    :absplaced_bin = cut(:absplaced, range(0, 180, 10), labels = fmt)
+    :lap_bool = :lap .> 0
+    :both = :category .== "both"
+end
+@transform! groupby(org, [:absplaced_bin, :category]) :lapn = count(:lap_bool)
+
+data(org) * mapping(:absplaced_bin, :lapn, row = :both) * visual(Scatter) |> draw()
+
+data(subset(org, :both)) * mapping(:absplaced_bin, :lapn) * visual(Scatter) |> draw()
+
+
+
+df2 = @transform df :placed = abs.(rad2deg.(:placed))
 fmt(from, to, i; leftclosed, rightclosed) = (from + to)/2
 @select! df2 begin
     :placed
@@ -297,6 +314,7 @@ end
 df3 = combine(groupby(df2, :placed_bin), nrow,  :lap => count => :lap)
 @transform! df3 :percent = 100*(:lap ./ :nrow)
 m = glm(@formula(lap ~ placed), df2, Binomial())
+
 n = 100
 newdf = DataFrame(placed = range(0, 180, n), lap = falses(n))
 plu = predict(m, newdf, interval = :confidence)
