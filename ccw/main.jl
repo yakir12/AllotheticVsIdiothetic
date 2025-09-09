@@ -13,9 +13,64 @@ const pt = 4/3
 const inch = 96
 const cm = inch / 2.54
 
+cutoff = 10
+
 set_theme!(Theme(Figure = (size = (5cm, 10cm), fontsize = 8pt, fonts = (; regular = "Helvetica")), Axis = (xticksize = 3, yticksize = 3, titlesize = 8pt, titlefont = :regular, xlabelsize = 8pt, ylabelsize = 8pt, xticklabelsize = 6pt, yticklabelsize = 6pt), Legend = (labelsize = 8pt, labelfont = "Helvetica")))
 
 # rm.(filter(==(".png") ∘ last ∘ splitext, readdir()))
+
+function report(df, file)
+    header = """Out of a total of $(nrow(df)) runs, $(count(==("both"), df.category)) turned both directions and $(count(>(0), df.lap)) turned more than 360°. Out of the ones that didn't turn multiple times nor turned more than 360°, $(count(==("shorter"), df.direction1)) turned towards the shorter direction and $(count(==("longer"), df.direction1)) turned towards the longer direction."""
+
+    gs = groupby(df, :direction1)
+    df2 = combine(gs, :residual1 .=> [mean, std] .=> [:μ, :σ]) 
+    g1, g2 = [DataFrame(g) for g in gs]
+    if nrow(g1) < 2 || nrow(g2) < 2
+        open("stats $file.md", "w") do io
+            print(io, """# Summary
+                  $header
+                  """
+                 )
+        end
+        return nothing
+    end
+    vartest = VarianceFTest(g1.residual1, g2.residual1)
+    meantest = UnequalVarianceTTest(g1.residual1, g2.residual1)
+    meanmagtest = UnequalVarianceTTest(g1.residual_magnitude1, g2.residual_magnitude1)
+    df3 = DataFrame(μ = mean(df.residual_magnitude1), σ = std(df.residual_magnitude1))
+    t = OneSampleTTest(df.residual_magnitude1)
+    μ = mean(df.residual_magnitude1)
+    σ = std(df.residual_magnitude1)
+    open("stats $file.md", "w") do io
+        print(io, """# Summary
+              $header
+
+              The residuals—defined as the difference between the expected and actual dance directions—show the following mean and standard deviation for beetles turning in the shorter versus longer direction:
+
+              $df2
+
+              An F-test assessing the null hypothesis that the two groups of residuals have equal variances revealed a significant difference in variance:
+
+              $vartest
+
+              Given this, we applied Welch’s t-test to determine whether the group means differ significantly. The test confirmed a significant difference:
+
+              $meantest
+
+              This indicates that beetles turning in the shorter direction (i.e., placed on the left half-circle and turning clockwise, or placed on the right and turning counterclockwise) performed significantly longer dances than those turning in the longer direction—and vice versa.
+
+              To assess whether the degree of over- or undershooting differed between the dance direction groups, we used Welch’s t-test on the magnitude of the turn (ignoring direction). The result showed no significant difference:
+
+              $meanmagtest
+
+              This suggests that beetles overshot or undershot by approximately the same amount (mean: $(μ)°, standard deviation: $(σ)°). Finally, we tested whether the magnitude of the residuals differed significantly from zero using a one-sample t-test:
+
+              $t
+
+              The result confirmed that the residuals are not centered around zero—indicating that beetles significantly over- or undershot their intended goal direction.""")
+    end
+    return nothing
+end
 
 
 function angular_distance(θ₁, θ₂)
@@ -155,6 +210,8 @@ df = @chain "repeated_dances.csv" begin
     @rtransform :direction1 = (:placed .< 0) == :cw1 ? "shorter" : "longer" 
     @transform :residual1 = get_residual.(:down, :cw1)
     @transform :residual_magnitude1 = ifelse.(:direction1 .== "longer", -:residual1, :residual1)
+    @transform :too_close = angular_distance.(:placed, 0) .< cutoff
+    @transform :changed_direction = :nr_direction_changes .> 0
 
 end
 
@@ -176,7 +233,10 @@ end
 
 # (pregrouped([0], [1]) * visual(ABLines; color = :gray) + data(corr) * mapping(:exit => rad2deg => "Mean exit (°)", :down => rad2deg => "Mean down (°)", color = :id => nonnumeric) * visual(Scatter)) |> draw(; axis = (; xticks = -180:90:180, yticks = -180:90:180, aspect = DataAspect()))
 
+report(df, "nothing excluded")
+
 notboth = @subset df :category .≠ "both"
+report(notboth, "both excluded")
 
 reversing = (; xreversed = false, yreversed = false)
 
@@ -247,55 +307,7 @@ save("inidividual relationship.png", fig)
 
 @subset! notboth :lap .== 0
 
-gs = groupby(notboth, :direction1)
-
-df2 = combine(gs, :residual1 .=> [mean, std] .=> [:μ, :σ]) 
-
-g1, g2 = [DataFrame(g) for g in gs]
-
-vartest = VarianceFTest(g1.residual1, g2.residual1)
-
-meantest = UnequalVarianceTTest(g1.residual1, g2.residual1)
-
-meanmagtest = UnequalVarianceTTest(g1.residual_magnitude1, g2.residual_magnitude1)
-
-df3 = DataFrame(μ = mean(notboth.residual_magnitude1), σ = std(notboth.residual_magnitude1))
-
-t = OneSampleTTest(notboth.residual_magnitude1)
-
-μ = mean(notboth.residual_magnitude1)
-σ = std(notboth.residual_magnitude1)
-
-open("stats noboth.md", "w") do io
-    print(io, """# Summary
-          Out of a total of $(nrow(df)) runs, $(count(==("both"), df.category)) turned both directions and $(count(>(0), df.lap)) turned more than 360°. Out of the ones that didn't turn multiple times nor turned more than 360°, $(count(==("shorter"), notboth.direction1)) turned towards the shorter direction and $(count(==("longer"), notboth.direction1)) turned towards the longer direction.
-
-          The residuals—defined as the difference between the expected and actual dance directions—show the following mean and standard deviation for beetles turning in the shorter versus longer direction:
-
-          $df2
-
-          An F-test assessing the null hypothesis that the two groups of residuals have equal variances revealed a significant difference in variance:
-
-          $vartest
-
-          Given this, we applied Welch’s t-test to determine whether the group means differ significantly. The test confirmed a significant difference:
-
-          $meantest
-
-          This indicates that beetles turning in the shorter direction (i.e., placed on the left half-circle and turning clockwise, or placed on the right and turning counterclockwise) performed significantly longer dances than those turning in the longer direction—and vice versa.
-
-          To assess whether the degree of over- or undershooting differed between the dance direction groups, we used Welch’s t-test on the magnitude of the turn (ignoring direction). The result showed no significant difference:
-
-          $meanmagtest
-
-          This suggests that beetles overshot or undershot by approximately the same amount (mean: $(μ)°, standard deviation: $(σ)°). Finally, we tested whether the magnitude of the residuals differed significantly from zero using a one-sample t-test:
-
-          $t
-
-          The result confirmed that the residuals are not centered around zero—indicating that beetles significantly over- or undershot their intended goal direction.""")
-end
-
-
+report(notboth, "both excluded and extra laps excluded")
 
 both = @subset df :category .== "both"
 
@@ -318,107 +330,36 @@ hist!(ax, both.residual_magnitude1, color = :black)
 
 save("scatter both.pdf", fig)
 
-gs = groupby(both, :direction1)
 
-df2 = combine(gs, :residual1 .=> [mean, std] .=> [:μ, :σ]) 
-
-g1, g2 = [DataFrame(g) for g in gs]
-
-vartest = VarianceFTest(g1.residual1, g2.residual1)
-
-meantest = UnequalVarianceTTest(g1.residual1, g2.residual1)
-
-meanmagtest = UnequalVarianceTTest(g1.residual_magnitude1, g2.residual_magnitude1)
-
-df3 = DataFrame(μ = mean(both.residual_magnitude1), σ = std(both.residual_magnitude1))
-
-t = OneSampleTTest(both.residual_magnitude1)
-
-μ = mean(both.residual_magnitude1)
-σ = std(both.residual_magnitude1)
-
-
-
-open("stats both.md", "w") do io
-    print(io, """# Summary
-          The residuals—defined as the difference between the expected and actual dance directions—show the following mean and standard deviation for beetles turning in the shorter versus longer direction:
-
-          $df2
-
-          An F-test assessing the null hypothesis that the two groups of residuals have equal variances revealed a significant difference in variance:
-
-          $vartest
-
-          Given this, we applied Welch’s t-test to determine whether the group means differ significantly. The test confirmed a significant difference:
-
-          $meantest
-
-          This indicates that beetles turning in the shorter direction (i.e., placed on the left half-circle and turning clockwise, or placed on the right and turning counterclockwise) performed significantly longer dances than those turning in the longer direction—and vice versa.
-
-          To assess whether the degree of over- or undershooting differed between the dance direction groups, we used Welch’s t-test on the magnitude of the turn (ignoring direction). The result showed no significant difference:
-
-          $meanmagtest
-
-          This suggests that beetles overshot or undershot by approximately the same amount (mean: $(μ)°, standard deviation: $(σ)°). Finally, we tested whether the magnitude of the residuals differed significantly from zero using a one-sample t-test:
-
-          $t
-
-          The result confirmed that the residuals are not centered around zero—indicating that beetles significantly over- or undershot their intended goal direction.""")
-end
+report(both, "single turning directions excluded")
 
 
 morelaps = @subset df :lap .> 0 :category .≠ "both"
 
-gs = groupby(morelaps, :direction1)
+report(morelaps, "both excluded and laps shorter than 360 excluded")
 
-df2 = combine(gs, :residual1 .=> [mean, std] .=> [:μ, :σ]) 
 
-g1, g2 = [DataFrame(g) for g in gs]
 
-vartest = VarianceFTest(g1.residual1, g2.residual1)
 
-meantest = UnequalVarianceTTest(g1.residual1, g2.residual1)
-
-meanmagtest = UnequalVarianceTTest(g1.residual_magnitude1, g2.residual_magnitude1)
-
-df3 = DataFrame(μ = mean(morelaps.residual_magnitude1), σ = std(morelaps.residual_magnitude1))
-
-t = OneSampleTTest(morelaps.residual_magnitude1)
-
-μ = mean(morelaps.residual_magnitude1)
-σ = std(morelaps.residual_magnitude1)
-
-open("stats morelaps.md", "w") do io
-    print(io, """# Summary
-          The residuals—defined as the difference between the expected and actual dance directions—show the following mean and standard deviation for beetles turning in the shorter versus longer direction:
-
-          $df2
-
-          An F-test assessing the null hypothesis that the two groups of residuals have equal variances revealed a significant difference in variance:
-
-          $vartest
-
-          Given this, we applied Welch’s t-test to determine whether the group means differ significantly. The test confirmed a significant difference:
-
-          $meantest
-
-          This indicates that beetles turning in the shorter direction (i.e., placed on the left half-circle and turning clockwise, or placed on the right and turning counterclockwise) performed significantly longer dances than those turning in the longer direction—and vice versa.
-
-          To assess whether the degree of over- or undershooting differed between the dance direction groups, we used Welch’s t-test on the magnitude of the turn (ignoring direction). The result showed no significant difference:
-
-          $meanmagtest
-
-          This suggests that beetles overshot or undershot by approximately the same amount (mean: $(μ)°, standard deviation: $(σ)°). Finally, we tested whether the magnitude of the residuals differed significantly from zero using a one-sample t-test:
-
-          $t
-
-          The result confirmed that the residuals are not centered around zero—indicating that beetles significantly over- or undershot their intended goal direction.""")
+_df = @chain df begin
+    @subset :lap .> 0 #.!:changed_direction
+    @select :placed :too_close :changed_direction
 end
 
+fig = Figure()
+ax = PolarAxis(fig[1,1], theta_0 = -π/2, direction = -1)
+h = []
+l = []
+for (k, g) in pairs(groupby(_df, :changed_direction))
+    _h = scatter!(ax, deg2rad.(g.placed), 9ones(nrow(g)), label = k.changed_direction)
+    push!(h, _h)
+    push!(l, k.changed_direction ? "changed direction" : "didn't")
+end
+@subset! _df :too_close
+c = scatter!(ax, deg2rad.(_df.placed), 9ones(nrow(_df)), markersize = 20, color = :transparent, strokecolor = :red, strokewidth = 1)
+Legend(fig[1,2], [h; c], [l; "too close?"])
 
-
-
-
+save("figure2.pdf", fig)
 
 
 # using GLM

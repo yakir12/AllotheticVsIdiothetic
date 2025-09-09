@@ -1,4 +1,6 @@
 # Summary
+Out of a total of 28 runs, 28 turned both directions and 4 turned more than 360°. Out of the ones that didn't turn multiple times nor turned more than 360°, 11 turned towards the shorter direction and 17 turned towards the longer direction.
+
 The residuals—defined as the difference between the expected and actual dance directions—show the following mean and standard deviation for beetles turning in the shorter versus longer direction:
 
 2×3 DataFrame
