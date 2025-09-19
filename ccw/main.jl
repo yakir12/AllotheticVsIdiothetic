@@ -5,7 +5,7 @@ using DataFramesMeta
 using AlgebraOfGraphics
 using GLMakie
 using CairoMakie
-# using MixedModels, GLM
+using GLM
 # using Optim
 using HypothesisTests
 
@@ -210,6 +210,7 @@ df = @chain "repeated_dances.csv" begin
     @rtransform :direction1 = (:placed .< 0) == :cw1 ? "shorter" : "longer" 
     @transform :residual1 = get_residual.(:down, :cw1)
     @transform :residual_magnitude1 = ifelse.(:direction1 .== "longer", -:residual1, :residual1)
+    @transform :overshoot = :residual1 .> 0
     @transform :too_close = angular_distance.(:placed, 0) .< cutoff
     @transform :changed_direction = :nr_direction_changes .> 0
 
@@ -360,6 +361,14 @@ c = scatter!(ax, deg2rad.(_df.placed), 9ones(nrow(_df)), markersize = 20, color 
 Legend(fig[1,2], [h; c], [l; "too close?"])
 
 save("figure2.pdf", fig)
+
+m = glm(@formula(overshoot ~ direction1), @subset(df, .!:changed_direction), Binomial())
+newdf = DataFrame(direction1 = ["shorter", "longer"], overshoot = falses(2))
+plu = predict(m, newdf, interval = :confidence)
+newdf.prediction = 100disallowmissing(plu.prediction)
+newdf.lower = 100disallowmissing(plu.lower)
+newdf.upper = 100disallowmissing(plu.upper)
+
 
 
 # using GLM

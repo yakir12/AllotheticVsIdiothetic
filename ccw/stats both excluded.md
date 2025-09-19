@@ -73,7 +73,7 @@ Details:
     empirical standard error: 5.648624544009979
 
 
-This suggests that beetles overshot or undershot by approximately the same amount (mean: 12.577974001430485°, standard deviation: 43.2488006953867°). Finally, we tested whether the magnitude of the residuals differed significantly from zero using a one-sample t-test:
+This suggests that beetles overshot or undershot by approximately the same amount (mean: 12.577974001430483°, standard deviation: 43.248800695386706°). Finally, we tested whether the magnitude of the residuals differed significantly from zero using a one-sample t-test:
 
 One sample t-test
 -----------------
@@ -89,9 +89,9 @@ Test summary:
 
 Details:
     number of observations:   272
-    t-statistic:              4.796462748591556
+    t-statistic:              4.796462748591554
     degrees of freedom:       271
-    empirical standard error: 2.622343727181851
+    empirical standard error: 2.6223437271818515
 
 
 The result confirmed that the residuals are not centered around zero—indicating that beetles significantly over- or undershot their intended goal direction.

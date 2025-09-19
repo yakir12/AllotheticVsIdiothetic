@@ -25,7 +25,7 @@ Test summary:
 
 Details:
     number of observations: [111, 151]
-    F statistic:            1.9417158494313917
+    F statistic:            1.9417158494313922
     degrees of freedom:     [110, 150]
 
 
@@ -45,7 +45,7 @@ Test summary:
 
 Details:
     number of observations:   [111,151]
-    t-statistic:              -4.787216622757535
+    t-statistic:              -4.787216622757536
     degrees of freedom:       189.1710538205338
     empirical standard error: 5.738474098684832
 
@@ -68,7 +68,7 @@ Test summary:
 
 Details:
     number of observations:   [111,151]
-    t-statistic:              0.9662718092888236
+    t-statistic:              0.9662718092888242
     degrees of freedom:       189.1710538205338
     empirical standard error: 5.738474098684832
 

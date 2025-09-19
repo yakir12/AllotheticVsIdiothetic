@@ -25,7 +25,7 @@ Test summary:
 
 Details:
     number of observations: [129, 171]
-    F statistic:            1.910247920272187
+    F statistic:            1.9102479202721874
     degrees of freedom:     [128, 170]
 
 
@@ -73,7 +73,7 @@ Details:
     empirical standard error: 5.325126193765271
 
 
-This suggests that beetles overshot or undershot by approximately the same amount (mean: 11.339137591919107°, standard deviation: 43.714627666118965°). Finally, we tested whether the magnitude of the residuals differed significantly from zero using a one-sample t-test:
+This suggests that beetles overshot or undershot by approximately the same amount (mean: 11.339137591919103°, standard deviation: 43.71462766611897°). Finally, we tested whether the magnitude of the residuals differed significantly from zero using a one-sample t-test:
 
 One sample t-test
 -----------------
@@ -89,7 +89,7 @@ Test summary:
 
 Details:
     number of observations:   300
-    t-statistic:              4.492766717178301
+    t-statistic:              4.4927667171782995
     degrees of freedom:       299
     empirical standard error: 2.5238652050558046
 
