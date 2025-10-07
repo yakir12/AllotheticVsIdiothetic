@@ -143,6 +143,11 @@ df = @chain "rotation_elevation_compiled.csv" begin
         end
         @assert all(==("both"), @subset(_, :nr_direction_changes .> 0).category)
         @assert all(>(0), @subset(_, :category .== "both").nr_direction_changes)
+        @assert all(≠("both"), @subset(_, :nr_direction_changes .== 0).category)
+        @assert all(==(0), @subset(_, :category .≠ "both").nr_direction_changes)
+        for field in (:rotation_2_direction, :full_lap_2, :stop_2_angle_FACE, :rotation_3_direction, :full_lap_3, :stop_3_angle_FACE)
+            @assert all(ismissing, vec(Matrix(select(@subset(_, :nr_direction_changes .== 0), field))))
+        end
         @assert all(ismissing, @subset(_, ismissing.(:stop_2_angle_FACE)).full_lap_2)
         @assert all(ismissing, @subset(_, ismissing.(:full_lap_2)).stop_2_angle_FACE)
         @assert all(ismissing, @subset(_, ismissing.(:stop_3_angle_FACE)).full_lap_3)
@@ -175,6 +180,7 @@ df = @chain "rotation_elevation_compiled.csv" begin
         Not(:down)
     end
 
+    @transform :minimized_rotation = :category .≠ "both" .&& abs.(:dance1) .< 180
     @transform :placed_from_left = :placed .> 180
     @transform :shorter_direction1 = :placed_from_left .== :cw1
     transform(r"full_lap" => ByRow((xs...) -> any(>(0), skipmissing(xs))) => :lap)
@@ -213,20 +219,47 @@ row2 = fig[2,1] = GridLayout()
 
 
 limits = (nothing, (nothing, 0.74))
-ax2 = Axis(row2[1,1]; xticks = 0:30:90, yticks = 0:0.25:1, ylabel = "Proportion of population", title = "Shorter direction", limits)
-plotit!(ax2, df, :shorter_direction1)
+ax2 = Axis(row2[1,1]; xticks = 0:30:90, yticks = 0:0.25:1, ylabel = "Proportion of population", title = "Minimized rotation", limits)
+plotit!(ax2, df, :minimized_rotation)
 
+
+m = glm(@formula(minimized_rotation ~ elevation), df, Binomial())
+@show m
+n = 100
+newdf = DataFrame(elevation = range(0, 90, n), minimized_rotation = falses(n))
+plu = predict(m, newdf, interval = :confidence)
+newdf.prediction = disallowmissing(plu.prediction)
+newdf.lower = disallowmissing(plu.lower)
+newdf.upper = disallowmissing(plu.upper)
+
+# fig = Figure()
+# ax = Axis(fig[1,1])
+band!(ax2, newdf.elevation, newdf.lower, newdf.upper, color = (Makie.wong_colors()[1], 0.2))
+lines!(ax2, newdf.elevation, newdf.prediction, color = Makie.wong_colors()[1])
 
 
 ax3 = Axis(row2[1,2]; xticks = 0:30:90, title = "Direction changes", limits)
 plotit!(ax3, df, :changed_direction)
+
+
+m = glm(@formula(changed_direction ~ elevation), df, Binomial())
+@show m
+n = 100
+newdf = DataFrame(elevation = range(0, 90, n), changed_direction = falses(n))
+plu = predict(m, newdf, interval = :confidence)
+newdf.prediction = disallowmissing(plu.prediction)
+newdf.lower = disallowmissing(plu.lower)
+newdf.upper = disallowmissing(plu.upper)
+
+band!(ax3, newdf.elevation, newdf.lower, newdf.upper, color = (Makie.wong_colors()[1], 0.2))
+lines!(ax3, newdf.elevation, newdf.prediction, color = Makie.wong_colors()[1])
 
 hideydecorations!(ax3, label = false, grid = false, minorgrid = false)
 
 linkaxes!(ax3, ax2)
 
 m = glm(@formula(lap ~ elevation), df, Binomial())
-
+@show m
 n = 100
 newdf = DataFrame(elevation = range(0, 90, n), lap = falses(n))
 plu = predict(m, newdf, interval = :confidence)
@@ -238,7 +271,7 @@ ax4 = Axis(row2[1,3]; xticks = 0:30:90, title = "Extra lap", limits)
 
 plotit!(ax4, df, :lap)
 band!(ax4, newdf.elevation, newdf.lower, newdf.upper, color = (Makie.wong_colors()[1], 0.2))
-lines!(newdf.elevation, newdf.prediction, color = Makie.wong_colors()[1])
+lines!(ax4, newdf.elevation, newdf.prediction, color = Makie.wong_colors()[1])
 
 
 hideydecorations!(ax4, label = false, grid = false, minorgrid = false)
@@ -300,6 +333,16 @@ m = glm(@formula(lap ~ elevation), @subset(df, .!:changed_direction, .!:too_clos
 m = glm(@formula(changed_direction ~ elevation), df, Binomial())
 
 m = glm(@formula(changed_direction ~ elevation), @subset(df, .!:too_close), Binomial())
+
+
+
+CSV.write("data.csv", df)
+
+#
+# df2 = @subset df :elevation .== 5 :category .≠ "both"
+# @select df2 :dance1 :abs_total
+# count(<(180), df2.abs_total)
+#
 
 # using CategoricalArrays
 #

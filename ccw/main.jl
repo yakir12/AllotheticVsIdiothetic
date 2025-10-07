@@ -8,6 +8,7 @@ using CairoMakie
 using GLM
 # using Optim
 using HypothesisTests
+using MixedModels
 
 const pt = 4/3
 const inch = 96
@@ -213,10 +214,21 @@ df = @chain "repeated_dances.csv" begin
     @transform :overshoot = :residual1 .> 0
     @transform :too_close = angular_distance.(:placed, 0) .< cutoff
     @transform :changed_direction = :nr_direction_changes .> 0
+    @transform :minimized_rotation = :category .≠ "both" .&& abs.(:dance1) .< 180
 
 end
 
 
+m = glmm(@formula(minimized_rotation ~ 1 + (1|id)), df, Binomial())
+
+@show m
+n = 100
+newdf = DataFrame(elevation = range(0, 90, n), minimized_rotation = falses(n), id = 9999)
+plu = predict(m, newdf, new_re_levels=:population, type=:response)
+
+newdf.prediction = disallowmissing(plu.prediction)
+newdf.lower = disallowmissing(plu.lower)
+newdf.upper = disallowmissing(plu.upper)
 
 # using MixedModels
 #
