@@ -1,15 +1,17 @@
 using CSV, DataFrames, GLM, Optim
 using GLMakie, AlgebraOfGraphics
+using CairoMakie
 
 n = 100
 elevation = range(0, 90, n)
 
 function plotit(df1, m, df2, file)
-    fig = band(df2.elevation, df2.lower, df2.upper, color = :gray, axis = (; title = file, xlabel = "Elevation (°)", ylabel = "Probability", limits = ((0, 90),(-0.01, 0.5))))
+    fig = band(df2.elevation, df2.lower, df2.upper, color = :gray, figure = (; backgroundcolor = :transparent), axis = (; title = file, xlabel = "Elevation (°)", ylabel = "Probability", limits = ((0, 90),(-0.01, 0.5))))
     lines!(df2.elevation, df2.prediction, color = :white)
     scatter!(df1.elevation, df1.p, color = :black, markersize = 20)
     !ismissing(m) && text!(0, 0.5, text = string("BIC = ", round(Int, GLM.bic(m))), align = (:left, :top), offset = (10, -10))
-    save("$file.png", fig)
+    # save("$file.png", fig)
+    save("$(filter(!isspace, file)).svg", fig)
 end
 
 function prediction(chain, x)

@@ -222,13 +222,21 @@ end
 m = glmm(@formula(minimized_rotation ~ 1 + (1|id)), df, Binomial())
 
 @show m
-n = 100
-newdf = DataFrame(elevation = range(0, 90, n), minimized_rotation = falses(n), id = 9999)
-plu = predict(m, newdf, new_re_levels=:population, type=:response)
 
-newdf.prediction = disallowmissing(plu.prediction)
-newdf.lower = disallowmissing(plu.lower)
-newdf.upper = disallowmissing(plu.upper)
+samp = parametricbootstrap(10_000, m)
+
+μ = only(predict(m, [(; minimized_rotation = false, id = 9999)], new_re_levels=:population, type=:response))
+lb, ub = @chain samp begin
+    shortestcovint
+    DataFrame
+    @subset :type .== "β"
+    @select :lower :upper
+    eachrow
+    only
+end
+
+
+
 
 # using MixedModels
 #
