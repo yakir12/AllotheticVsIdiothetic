@@ -261,29 +261,29 @@ report(notboth, "both excluded")
 
 reversing = (; xreversed = false, yreversed = false)
 
-example_individual = 24
+example_individuals = [24,25,26]
 
 colors = reverse(Makie.wong_colors())
 gap = 40
 max_y = maximum(abs, notboth.dance1)
 fig = Figure(size = (12cm, 12cm))
-ax2 = Axis(fig[1:3,1]; reversing..., limits = (-180 - gap, 180 + gap, -max_y - gap, max_y + gap), aspect = AxisAspect((180 + gap)/(max_y + gap)), xaxisposition = :top, yaxisposition = :right, xticks = ([-90, 90], [rich("Left", color = colors[5]), rich("Right", color = colors[4])]), yticks = (max_y ./ [-2, 2], [rich("Counterclockwise", color = colors[7]), rich("Clockwise", color = colors[6])]), yticklabelrotation = -π/2)
+ax2 = Axis(fig[1:3,1]; reversing..., limits = (-180 - gap, 180 + gap, -max_y - gap, max_y + gap), aspect = AxisAspect((180 + gap)/(max_y + gap)), xaxisposition = :top, yaxisposition = :right, xticks = [-90, 90], yticks = (max_y ./ [-2, 2], [rich("Counterclockwise", color = colors[3]), rich("Clockwise", color = colors[4])]), yticklabelrotation = -π/2)
 hidespines!(ax2)
 hidedecorations!(ax2, ticklabels = false)
 ax = Axis(fig[1:3,1]; reversing..., limits = (-180 - gap, 180 + gap, -max_y - gap, max_y + gap), aspect = AxisAspect((180 + gap)/(max_y + gap)), yticks = -720:180:720, xticks = -180:180:180, ylabel = "Total rotation (°)", xlabel = "Initial orientation relative to intended bearing (°)")
 for (i, label) in zip([0, 1, -1], ["shorter rotation direction", "longer rotation direction", "longer rotation direction"])
-    ablines!(ax, 360i, -1; label, color = abs(i), colorrange = (0, 2), colormap = colors)#, linestyle = :dash)
+    ablines!(ax, 360i, -1; label, color = abs(i), colorrange = (0, 1), colormap = colors[1:2])#, linestyle = :dash)
 end
-_df = @subset notboth :id .≠ example_individual
+_df = @subset notboth :id .∉ Ref(example_individuals)
 scatter!(ax, _df.placed, _df.dance1, color = (:black, 0.5))
-_df = @subset notboth :id .== example_individual
-scatter!(ax, _df.placed, _df.dance1, color = (:red, 0.5))
+_df = @subset notboth :id .∈ Ref(example_individuals)
+for (g, c) in zip(groupby(_df, :id), colors[5:7])
+    scatter!(ax, g.placed, g.dance1, color = Makie.RGBA(c, 1))
+end
 # _df = @subset notboth :lap .> 0
 # scatter!(ax, _df.placed, _df.dance1, color = :transparent, markersize = 20, strokecolor = :red, strokewidth = 1)
-poly!(ax, Rect(-180 - gap/2, -max_y - gap/2, 175 + gap/2, 2*max_y + gap), color = (colors[5], 0.2))
-poly!(ax, Rect(5, -max_y - gap/2, 180 + gap/2, 2*max_y + gap), color = (colors[4], 0.2))
-poly!(ax, Rect(-180 - 0.75gap, -max_y - 0.75gap, 360 + 1.5gap, max_y - 5 + 0.75gap), color = :transparent, strokecolor = colors[7], strokewidth = 2)
-poly!(ax, Rect(-180 - 0.75gap, 5, 360 + 1.5gap, max_y - 5 + 0.75gap), color = :transparent, strokecolor = colors[6], strokewidth = 2)
+poly!(ax, Rect(-180 - 0.75gap, -max_y - 0.75gap, 360 + 1.5gap, max_y - 5 + 0.75gap), color = :transparent, strokecolor = colors[3], strokewidth = 2)
+poly!(ax, Rect(-180 - 0.75gap, 5, 360 + 1.5gap, max_y - 5 + 0.75gap), color = :transparent, strokecolor = colors[4], strokewidth = 2)
 Legend(fig[1,2], ax, merge = true)
 ax = Axis(fig[2,2], xlabel = "Residuals (°)", ylabel = "Counts", xticks = -180:90:180)
 hist!(ax, notboth.residual_magnitude1, color = :black)
@@ -308,8 +308,8 @@ save("scatter.pdf", fig)
 
 # GLMakie.activate!()
 fig = Figure(size = (10cm, 20cm))
-xy = data(subset(notboth, :id => ByRow(≠(example_individual)))) * mapping(:placed, :dance1, layout = :id => nonnumeric) * visual(Scatter; color = (:black, 0.5))
-xy42 = data(subset(notboth, :id => ByRow(==(example_individual)))) * mapping(:placed, :dance1, layout = :id => nonnumeric) * visual(Scatter; color = (:red, 0.5))
+xy = data(subset(notboth, :id => ByRow(∉(example_individuals)))) * mapping(:placed, :dance1, layout = :id => nonnumeric) * visual(Scatter; color = (:black, 0.5))
+xy42 = data(subset(notboth, :id => ByRow(∈(example_individuals)))) * mapping(:placed, :dance1, layout = :id => nonnumeric) * visual(Scatter; color = (:red, 0.5))
 abline = data(DataFrame(a = 360 .* (-2:2), b = -1, color = [2,1,3,1,2])) * mapping(:a, :b, color = :color) * visual(ABLines; color = colors)
 toplot = abline + xy + xy42
 g = draw!(fig[1,1], toplot, scales(; Layout = (; legend = false) ); axis = (; reversing..., xlabel = "Initial orientation relative to intended bearing (°)", ylabel = "Total rotation (°)", xticks = [-180, 180], yticks = -720:360:720, aspect = DataAspect()))
@@ -333,7 +333,7 @@ report(notboth, "both excluded and extra laps excluded")
 both = @subset df :category .== "both"
 
 fig = Figure(size = (12cm, 12cm))
-ax2 = Axis(fig[1:2,1]; reversing..., limits = (-180 - gap, 180 + gap, -max_y - gap, max_y + gap), aspect = AxisAspect((180 + gap)/(max_y + gap)), xaxisposition = :top, yaxisposition = :right, xticks = ([-90, 90], [rich("Right", color = colors[5]), rich("Left", color = colors[4])]), yticks = (max_y ./ [-2, 2], [rich("Clockwise", color = colors[7]), rich("Counterclockwise", color = colors[6])]), yticklabelrotation = -π/2)
+ax2 = Axis(fig[1:2,1]; reversing..., limits = (-180 - gap, 180 + gap, -max_y - gap, max_y + gap), aspect = AxisAspect((180 + gap)/(max_y + gap)), xaxisposition = :top, yaxisposition = :right, xticks = [-90, 90], yticks = (max_y ./ [-2, 2], [rich("Clockwise", color = colors[5]), rich("Counterclockwise", color = colors[4])]), yticklabelrotation = -π/2)
 hidespines!(ax2)
 hidedecorations!(ax2, ticklabels = false)
 ax = Axis(fig[1:2,1]; reversing..., limits = (-180 - gap, 180 + gap, -max_y - gap, max_y + gap), aspect = AxisAspect((180 + gap)/(max_y + gap)), yticks = -720:180:720, xticks = -180:180:180, ylabel = "Total rotation (°)", xlabel = "Initial orientation relative to intended bearing (°)")
@@ -341,10 +341,8 @@ for (i, label) in zip([0, 1, -1], ["shorter rotation direction", "longer rotatio
     ablines!(ax, 360i, -1; label, color = abs(i), colorrange = (0, 2), colormap = colors)#, linestyle = :dash)
 end
 scatter!(ax, both.placed, both.total_dance, color = (:black, 0.5))
-poly!(ax, Rect(-180 - gap/2, -max_y - gap/2, 175 + gap/2, 2*max_y + gap), color = (colors[5], 0.2))
-poly!(ax, Rect(5, -max_y - gap/2, 180 + gap/2, 2*max_y + gap), color = (colors[4], 0.2))
-poly!(ax, Rect(-180 - 0.75gap, -max_y - 0.75gap, 360 + 1.5gap, max_y - 5 + 0.75gap), color = :transparent, strokecolor = colors[7], strokewidth = 2)
-poly!(ax, Rect(-180 - 0.75gap, 5, 360 + 1.5gap, max_y - 5 + 0.75gap), color = :transparent, strokecolor = colors[6], strokewidth = 2)
+poly!(ax, Rect(-180 - 0.75gap, -max_y - 0.75gap, 360 + 1.5gap, max_y - 5 + 0.75gap), color = :transparent, strokecolor = colors[5], strokewidth = 2)
+poly!(ax, Rect(-180 - 0.75gap, 5, 360 + 1.5gap, max_y - 5 + 0.75gap), color = :transparent, strokecolor = colors[4], strokewidth = 2)
 Legend(fig[1,2], ax, merge = true)
 ax = Axis(fig[2,2], xlabel = "Residuals (°)", ylabel = "Counts", xticks = -180:90:180)
 hist!(ax, both.residual_magnitude1, color = :black)
