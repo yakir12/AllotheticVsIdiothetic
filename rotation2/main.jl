@@ -175,12 +175,12 @@ df = @chain "rotation_elevation_compiled.csv" begin
     # @select Not(:down2, 
 
     @select begin
-        :placed = normalize_angle.(:placed .- :down)  # fix this shit
+        :placed = normalize_angle.(:placed .- :down) 
         :exit = normalize_angle.(:exit .- :down .- 180) 
         Not(:down)
     end
 
-    @transform :minimized_rotation = :category .≠ "both" .&& abs.(:dance1) .< 180
+    @transform :minimized_rotation = :category .≠ "both" .&& abs.(:dance1) .≤ 180
     @transform :placed_from_left = :placed .> 180
     @transform :shorter_direction1 = :placed_from_left .== :cw1
     transform(r"full_lap" => ByRow((xs...) -> any(>(0), skipmissing(xs))) => :lap)

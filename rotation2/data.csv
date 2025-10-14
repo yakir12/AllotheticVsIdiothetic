@@ -1,4 +1,4 @@
-placed,exit,elevation,id,abs_total,category,nr_direction_changes,rotation_1_direction,full_lap_1,stop_1_angle_FACE,rotation_2_direction,full_lap_2,stop_2_angle_FACE,rotation_3_direction,full_lap_3,stop_3_angle_FACE,cw1,cw2,cw3,dance1,dance2,dance3,rotated_less_180,placed_from_left,shorter_direction1,lap,changed_direction,residual1,too_close
+placed,exit,elevation,id,abs_total,category,nr_direction_changes,rotation_1_direction,full_lap_1,stop_1_angle_FACE,rotation_2_direction,full_lap_2,stop_2_angle_FACE,rotation_3_direction,full_lap_3,stop_3_angle_FACE,cw1,cw2,cw3,dance1,dance2,dance3,minimized_rotation,placed_from_left,shorter_direction1,lap,changed_direction,residual1,too_close
 250,355,5,#01_20170509,310,both,1,cw,0,70,ccw,0,150,,,,true,false,,30,-280,,false,true,true,false,true,-80,false
 55,25,5,#02_20170509,55,ccw,0,ccw,0,110,,,,,,,false,,,-55,,,true,false,true,false,false,-180,false
 280,25,5,#03_20170509,280,ccw,0,ccw,0,115,,,,,,,false,,,-280,,,false,true,false,false,false,-180,false
@@ -34,7 +34,7 @@ placed,exit,elevation,id,abs_total,category,nr_direction_changes,rotation_1_dire
 245,5,22,#07_20170329,245,ccw,0,ccw,0,125,,,,,,,false,,,-245,,,false,true,false,false,false,-180,false
 210,345,22,#09_20170329,230,both,1,ccw,0,135,cw,0,145,,,,false,true,,-220,10,,false,true,false,false,true,-190,false
 225,335,22,#10_20170329,135,cw,0,cw,0,100,,,,,,,true,,,135,,,true,true,true,false,false,0,false
-180,325,22,#11_20170329,180,cw,0,cw,0,165,,,,,,,true,,,180,,,false,false,false,false,false,0,false
+180,325,22,#11_20170329,180,cw,0,cw,0,165,,,,,,,true,,,180,,,true,false,false,false,false,0,false
 70,225,22,#12_20170329,70,ccw,0,ccw,0,125,,,,,,,false,,,-70,,,true,false,true,false,false,-180,false
 235,355,22,#13_20170329,235,ccw,0,ccw,0,185,,,,,,,false,,,-235,,,false,true,false,false,false,-180,false
 235,335,22,#14_20170329,275,both,2,ccw,0,40,cw,0,60,ccw,0,180,false,true,false,-15,20,-240,false,true,false,false,true,140,false
@@ -119,7 +119,7 @@ placed,exit,elevation,id,abs_total,category,nr_direction_changes,rotation_1_dire
 80,30,60,#30_20170419,80,ccw,0,ccw,0,220,,,,,,,false,,,-80,,,true,false,true,false,false,-180,false
 330,325,60,#31_20170419,30,cw,0,cw,0,15,,,,,,,true,,,30,,,true,true,true,false,false,0,false
 255,325,60,#32_20170419,255,ccw,0,ccw,0,340,,,,,,,false,,,-255,,,false,true,false,false,false,-180,false
-180,65,75,#01_20170411,180,ccw,0,ccw,0,105,,,,,,,false,,,-180,,,false,false,true,false,false,-180,false
+180,65,75,#01_20170411,180,ccw,0,ccw,0,105,,,,,,,false,,,-180,,,true,false,true,false,false,-180,false
 215,250,75,#02_20170411,145,cw,0,cw,0,260,,,,,,,true,,,145,,,true,true,true,false,false,0,false
 170,340,75,#03_20170411,240,both,1,ccw,0,155,cw,0,10,,,,false,true,,-25,215,,false,false,true,false,true,-35,false
 95,285,75,#04_20170411,95,ccw,0,ccw,0,335,,,,,,,false,,,-95,,,true,false,true,false,false,-180,false
@@ -163,7 +163,7 @@ placed,exit,elevation,id,abs_total,category,nr_direction_changes,rotation_1_dire
 145,75,80,#12_20170529,145,ccw,0,ccw,0,145,,,,,,,false,,,-145,,,true,false,true,false,false,-180,false
 160,340,80,#13_20170529,200,cw,0,cw,0,40,,,,,,,true,,,200,,,false,false,false,false,false,0,false
 40,200,80,#14_20170529,40,ccw,0,ccw,0,260,,,,,,,false,,,-40,,,true,false,true,false,false,-180,false
-180,110,80,#15_20170529,180,cw,0,cw,0,25,,,,,,,true,,,180,,,false,false,false,false,false,0,false
+180,110,80,#15_20170529,180,cw,0,cw,0,25,,,,,,,true,,,180,,,true,false,false,false,false,0,false
 150,300,80,#16_20170529,210,cw,0,cw,0,320,,,,,,,true,,,210,,,false,false,false,false,false,0,false
 50,20,80,#17_20170529,50,ccw,0,ccw,0,140,,,,,,,false,,,-50,,,true,false,true,false,false,-180,false
 235,30,80,#18_20170529,235,ccw,0,ccw,0,75,,,,,,,false,,,-235,,,false,true,false,false,false,-180,false

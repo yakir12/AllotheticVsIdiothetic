@@ -205,16 +205,16 @@ df = @chain "repeated_dances.csv" begin
     transform(r"full_lap_" => ByRow((xs...) -> sum(skipmissing(xs))) => :lap) 
 
     @groupby :id
-    @transform :mean_down = angular_mean(:down) :n = 1:length(:down)
-    @transform :placed = wrap_degrees.(:placed .- :mean_down)
-    @transform :down = wrap_degrees.(:down .- :mean_down) 
+    @transform :mean_exit = angular_mean(:exit) :n = 1:length(:exit)
+    @transform :placed = wrap_degrees.(:placed .- :mean_exit)
+    @transform :down = wrap_degrees.(:down .- :mean_exit) 
     @rtransform :direction1 = (:placed .< 0) == :cw1 ? "shorter" : "longer" 
     @transform :residual1 = get_residual.(:down, :cw1)
     @transform :residual_magnitude1 = ifelse.(:direction1 .== "longer", -:residual1, :residual1)
     @transform :overshoot = :residual1 .> 0
     @transform :too_close = angular_distance.(:placed, 0) .< cutoff
     @transform :changed_direction = :nr_direction_changes .> 0
-    @transform :minimized_rotation = :category .≠ "both" .&& abs.(:dance1) .< 180
+    @transform :minimized_rotation = :category .≠ "both" .&& abs.(:dance1) .≤ 180
 
 end
 
