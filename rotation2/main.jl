@@ -220,13 +220,18 @@ row2 = fig[2,1] = GridLayout()
 
 limits = (nothing, (nothing, 0.74))
 ax2 = Axis(row2[1,1]; xticks = 0:30:90, yticks = 0:0.25:1, ylabel = "Proportion of population", title = "Minimized rotation", limits)
-plotit!(ax2, df, :minimized_rotation)
+
+df2 = @subset df :category .≠ "both"
+@transform! df2 :longer_direction = .!:shorter_direction1
+
+plotit!(ax2, df2, :longer_direction)
 
 
-m = glm(@formula(minimized_rotation ~ elevation), df, Binomial())
+m = glm(@formula(longer_direction ~ elevation), df2, Binomial())
 @show m
+
 n = 100
-newdf = DataFrame(elevation = range(0, 90, n), minimized_rotation = falses(n))
+newdf = DataFrame(elevation = range(0, 90, n), longer_direction = falses(n))
 plu = predict(m, newdf, interval = :confidence)
 newdf.prediction = disallowmissing(plu.prediction)
 newdf.lower = disallowmissing(plu.lower)
