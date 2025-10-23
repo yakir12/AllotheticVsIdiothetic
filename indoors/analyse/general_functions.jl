@@ -132,7 +132,7 @@ end
 
 function get_calibration(file)
     c = CameraCalibrations.load(file)
-    f = rectification(c)
+    f = rectification(c, findfirst(contains("extrinsic"), c.files))
     # fun(ij)::Function = f.(ij)
     return f
 end

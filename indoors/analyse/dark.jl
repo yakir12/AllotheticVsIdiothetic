@@ -85,7 +85,10 @@ end
 ############ plot the tracks to check validity
 
 fig = (pregrouped(runs.smooth => first => "X (cm)", runs.smooth => last => "Y (cm)", layout = runs.run_id => nonnumeric) * visual(Lines; color = :red) + pregrouped(runs.xy => first => "X (cm)", runs.xy => last => "Y (cm)", layout = runs.run_id => nonnumeric) * visual(Lines)) |> draw(; axis = (; width = 400, height = 400, limits = ((-l, l), (-l, l))));
+GLMakie.activate!()
 save(joinpath(output, "overview_dark.png"), fig)
+CairoMakie.activate!()
+save(joinpath(output, "overview_dark.pdf"), fig)
 
 ################################################### 10 random tracks
 
@@ -107,7 +110,10 @@ for ax in fig.figure.content
     end
 end
 
+GLMakie.activate!()
 save(joinpath(output, "figure1.png"), fig)
+CairoMakie.activate!()
+save(joinpath(output, "figure1.pdf"), fig)
 
 # fig = pregrouped(df.rotated2poi => first => "X (cm)", df.rotated2poi => last => "Y (cm)", col = df.dance_by, color = df.y2025) * visual(Lines) |> draw(; axis = (; width = 400, height = 400))
 # for ax in fig.figure.content 
@@ -223,8 +229,11 @@ for i in 1:3
 end
 resize_to_layout!(fig)
 
-save(joinpath(output, "darkness 3 comparisons.png"), fig)
 
+GLMakie.activate!()
+save(joinpath(output, "darkness 3 comparisons.png"), fig)
+CairoMakie.activate!()
+save(joinpath(output, "darkness 3 comparisons.pdf"), fig)
 
 
 

@@ -108,8 +108,10 @@ end
 ############ plot the tracks to check validity
 
 fig = (pregrouped(runs.smooth => first => "X (cm)", runs.smooth => last => "Y (cm)", layout = runs.run_id => nonnumeric) * visual(Lines; color = :red) + pregrouped(runs.xy => first => "X (cm)", runs.xy => last => "Y (cm)", layout = runs.run_id => nonnumeric) * visual(Lines)) |> draw(; axis = (; width = 400, height = 400, limits = ((-l, l), (-l, l))));
+GLMakie.activate!()
 save(joinpath(output, "overview_shift.png"), fig)
-
+CairoMakie.activate!()
+save(joinpath(output, "overview_shift.pdf"), fig)
 ################################################### 10 random tracks
 
 n = 10
@@ -130,7 +132,11 @@ for ax in fig.figure.content
     end
 end
 
+
+GLMakie.activate!()
 save(joinpath(output, "figure1a.png"), fig)
+CairoMakie.activate!()
+save(joinpath(output, "figure1a.pdf"), fig)
 
 fig = pregrouped(df.rotated2poi => first => "X (cm)", df.rotated2poi => last => "Y (cm)", col = df.dance_by) * visual(Lines) |> draw(; axis = (; width = 400, height = 400))
 for ax in fig.figure.content 
@@ -141,7 +147,10 @@ for ax in fig.figure.content
     end
 end
 
+GLMakie.activate!()
 save(joinpath(output, "figure1b.png"), fig)
+CairoMakie.activate!()
+save(joinpath(output, "figure1b.pdf"), fig)
 
 df2 = stack(select(df, [:cropped, :dance_by, :rotated2poi]), [:cropped, :rotated2poi])
 fig = pregrouped(df2.value => first => "X (cm)", df2.value => last => "Y (cm)", col = df2.dance_by, row = df2.variable => renamer("cropped" => "unrotated", "rotated2poi" => "rotated")) * visual(Lines) |> draw(; axis = (; width = 400, height = 400))
@@ -153,7 +162,10 @@ for ax in fig.figure.content
     end
 end
 
+GLMakie.activate!()
 save(joinpath(output, "figure1c.png"), fig)
+CairoMakie.activate!()
+save(joinpath(output, "figure1c.pdf"), fig)
 
 ################################################### raw data for turning angles
 
@@ -169,12 +181,13 @@ end
 # fig = data(df) * mapping(:Δl => "Distance from POI (path length cm)", :absk => "k", :u, :v, col = :dance_by, row = :at_run => nonnumeric, color = :Δθ => rad2deg => "Total turn") * visual(Arrows) |> draw(scales(Color = (; colormap = :cyclic_wrwbw_40_90_c42_n256_s25, colorrange = (-180, 180))); axis = (; width = 200, height = 200), colorbar = (; ticks = -180:90:180, tickformat = "{:n}°"))
 
 
-heads = ['▲', '□']
-plt = data(df) * mapping(:Δl => "Distance from POI (path length cm)", :absk => "k", :u, :v, col = :dance_by, row = :at_run => nonnumeric, arrowhead = :location, color = :Δθ => rad2deg => "Total turn") * visual(Arrows, arrowsize=10, lengthscale=1, linewidth = 1) 
-fig = draw(plt, scales(Color = (; colormap = :cyclic_wrwbw_40_90_c42_n256_s25, colorrange = (-180, 180)), Marker = (; palette = heads)); axis = (; width = 200, height = 200))
+plt = data(df) * mapping(:Δl => "Distance from POI (path length cm)", :absk => "k", :u, :v, row = :location, col = :dance_by, color = :Δθ => rad2deg => "Total turn") * visual(Arrows2D) 
+fig = draw(plt, scales(Color = (; colormap = :cyclic_wrwbw_40_90_c42_n256_s25, colorrange = (-180, 180))); axis = (; width = 200, height = 200))
 
-
+GLMakie.activate!()
 save(joinpath(output, "figure5.png"), fig)
+CairoMakie.activate!()
+save(joinpath(output, "figure5.pdf"), fig)
 
 df2 = select(df, [:at_run, :dance_by, :L])
 @transform! df2 :L = round.(Int, rad2deg.(:L .+ π/2))
@@ -198,13 +211,17 @@ df2 = @chain df begin
     # @rtransform :dance_by = :dance_by == "no" ? "no" : "yes"
 end
 
-heads = ['▲', '□']
-plt = data(df2) * mapping(:Δl => "Distance from POI (path length cm)", :absk => "k", :u, :v, col = :dance_by, row = :at_run => nonnumeric, arrowhead = :location, color = :Δθ => rad2deg => "Total turn") * visual(Arrows, arrowsize=10, lengthscale=1, linewidth = 1) 
-fig = draw(plt, scales(Color = (; colormap = :cyclic_wrwbw_40_90_c42_n256_s25, colorrange = (-180, 180)), Marker = (; palette = heads)); axis = (; width = 200, height = 200))
+
+# TODO: fix this
+plt = data(df2) * mapping(:Δl => "Distance from POI (path length cm)", :absk => "k", :u, :v, col = :dance_by, row = :at_run => nonnumeric, color = :Δθ => rad2deg => "Total turn") * visual(Arrows2D) 
+fig = draw(plt, scales(Color = (; colormap = :cyclic_wrwbw_40_90_c42_n256_s25, colorrange = (-180, 180))); axis = (; width = 200, height = 200))
 
 
 fig = data(df2) * mapping(:location, :absk => "k", col = :dance_by) * visual(RainClouds, violin_limits = extrema) |> draw(; axis = (; width = 200, height = 200)) 
+GLMakie.activate!()
 save(joinpath(output, "figure7.png"), fig)
+CairoMakie.activate!()
+save(joinpath(output, "figure7.pdf"), fig)
 
 
 m = glm(@formula(kabs ~ location*dance_by), df2, Gamma())
@@ -247,7 +264,10 @@ end
 
 fig = pregrouped(df.lθshifted => "Distance from POI (path length cm)", df.θnormalized => rad2deg) * visual(Lines) * mapping(color = df.location, col = df.dance_by, row = df.at_run => nonnumeric) |> draw()#; axis = (; width = 400, height = 400, ytickformat = "{:n}°", yticks = -180:90:270, limits = ((-5, 5), nothing)))
 
+GLMakie.activate!()
 save(joinpath(output, "figure6.png"), fig)
+CairoMakie.activate!()
+save(joinpath(output, "figure6.pdf"), fig)
 
 
 ###
@@ -271,11 +291,11 @@ end
 m = mapping(col = df.induced => renamer(false => "Dance not induced", true => "Dance induced"), color = df.location => renamer("Lund" => "LED", "Bela-Bela" => "Sun") => "Stimulus") 
 tracks = pregrouped(df.rotated2poi => first => "X (cm)", df.rotated2poi => last => "Y (cm)") * visual(Lines) 
 angles = pregrouped(df.lθshifted => "Distance from POI (path length cm)", df.θnormalized => rad2deg => "Accumulated turn (°)") * visual(Lines)
-m3 = mapping(col = :induced => renamer(false => "", true => ""), color = :location => renamer("Lund" => "LED", "Bela-Bela" => "Sun") => "Stimulus") 
-plt = data(df) * mapping(:Δl => "Distance from POI (path length cm)", :absk => "k", :u, :v) * visual(Arrows, arrowsize=10, lengthscale=1, linewidth = 1) 
+m3 = mapping(col = :induced => renamer(false => "not", true => "induced"), color = :location => renamer("Lund" => "LED", "Bela-Bela" => "Sun") => "Stimulus") 
+plt = data(df) * mapping(:Δl => "Distance from POI (path length cm)", :absk => "k", :u, :v) * visual(Arrows2D) 
 
 fig = Figure()
-h = draw!(fig[1,1], m * tracks; axis = (; width = 250, height = 250))
+h = draw!(fig[2,1], m * tracks; axis = (; width = 250, height = 250))
 for ax in fig.content 
     if ax isa Axis
         for r  in (30, 50)
@@ -283,19 +303,22 @@ for ax in fig.content
         end
     end
 end
-draw!(fig[2,1], m * angles * mapping(col = df.induced => renamer(false => "", true => "")); axis = (; xticklabelsvisible = false, xticksvisible = false, xlabelvisible = false, xlabel = "", width = 250, height = 250, limits = ((-7, 17), (-200, 200)), yticks = -180:90:180))
-draw!(fig[3,1], m3 * plt; axis = (; width = 250, height = 250, limits = ((-7, 17), nothing)))
-legend!(fig[0, 1], h, orientation = :horizontal, titleposition = :left)
+draw!(fig[3,1], m * angles; axis = (; xticklabelsvisible = false, xticksvisible = false, xlabelvisible = false, xlabel = "", width = 250, height = 250, limits = ((-7, 17), (-200, 200)), yticks = -180:90:180))
+draw!(fig[4,1], m3 * plt; axis = (; width = 250, height = 250, limits = ((-7, 17), nothing)))
+legend!(fig[1, 1], h, orientation = :horizontal, titleposition = :left)
 resize_to_layout!(fig)
 
 
+GLMakie.activate!()
 save(joinpath(output, "figure1.png"), fig)
+CairoMakie.activate!()
+save(joinpath(output, "figure1.pdf"), fig)
 
 m = mapping(color = df.induced => renamer(false => "Dance not induced", true => "Dance induced"), col = df.location => renamer("Lund" => "LED", "Bela-Bela" => "Sun") => "Stimulus") 
 tracks = pregrouped(df.rotated2poi => first => "X (cm)", df.rotated2poi => last => "Y (cm)") * visual(Lines) 
 angles = pregrouped(df.lθshifted => "Distance from POI (path length cm)", df.θnormalized => rad2deg => "Accumulated turn (°)") * visual(Lines)
-m3 = mapping(color = :induced, col = :location => renamer("Lund" => "", "Bela-Bela" => "")) 
-plt = data(df) * mapping(:Δl => "Distance from POI (path length cm)", :absk => "k", :u, :v) * visual(Arrows, arrowsize=10, lengthscale=1, linewidth = 1) 
+m3 = mapping(color = :induced, col = :location) 
+plt = data(df) * mapping(:Δl => "Distance from POI (path length cm)", :absk => "k", :u, :v) * visual(Arrows2D) 
 fig = Figure()
 h = draw!(fig[1,1], m * tracks; axis = (; width = 250, height = 250))
 for ax in fig.content 
@@ -305,11 +328,14 @@ for ax in fig.content
         end
     end
 end
-draw!(fig[2,1], m * angles * mapping(col = df.location => renamer("Lund" => "", "Bela-Bela" => "") => "Stimulus"); axis = (; xticklabelsvisible = false, xticksvisible = false, xlabelvisible = false, xlabel = "", width = 250, height = 250, limits = ((-7, 17), (-200, 200)), yticks = -180:90:180))
+draw!(fig[2,1], m * angles * mapping(col = df.location => "Stimulus"); axis = (; xticklabelsvisible = false, xticksvisible = false, xlabelvisible = false, xlabel = "", width = 250, height = 250, limits = ((-7, 17), (-200, 200)), yticks = -180:90:180))
 draw!(fig[3,1], m3 * plt; axis = (; width = 250, height = 250, limits = ((-7, 17), nothing)))
 legend!(fig[0, 1], h, orientation = :horizontal, titleposition = :left)
 resize_to_layout!(fig)
 
 
+GLMakie.activate!()
 save(joinpath(output, "figure2.png"), fig)
+CairoMakie.activate!()
+save(joinpath(output, "figure2.pdf"), fig)
 
