@@ -1,7 +1,7 @@
 using AlgebraOfGraphics, GLMakie, CairoMakie
 using GLM
 # using MultivariateStats
-using DataFramesMeta, Chain
+using DataFramesMeta
 using HypothesisTests
 using GeometryBasics
 # using StatsBase, Graphs
@@ -262,7 +262,7 @@ m = mapping(col = df.induced => renamer(false => "Dance not induced", true => "D
 tracks = pregrouped(df.rotated2poi => first => "X (cm)", df.rotated2poi => last => "Y (cm)") * visual(Lines) 
 angles = pregrouped(df.lθshifted => "Distance from POI (path length cm)", df.θnormalized => rad2deg => "Accumulated turn (°)") * visual(Lines)
 m3 = mapping(col = :induced => renamer(false => "", true => ""))
-plt = data(df) * mapping(:Δl => "Distance from POI (path length cm)", :absk => "k", :u, :v) * visual(Arrows, arrowsize=10, lengthscale=1, linewidth = 1) 
+plt = data(df) * mapping(:Δl => "Distance from POI (path length cm)", :absk => "k", :u, :v) * visual(Arrows2D) 
 
 fig = Figure()
 h = draw!(fig[1,1], m * tracks; axis = (; width = 250, height = 250))
@@ -285,7 +285,7 @@ m = mapping(color = df.induced => renamer(false => "Dance not induced", true => 
 tracks = pregrouped(df.rotated2poi => first => "X (cm)", df.rotated2poi => last => "Y (cm)") * visual(Lines) 
 angles = pregrouped(df.lθshifted => "Distance from POI (path length cm)", df.θnormalized => rad2deg => "Accumulated turn (°)") * visual(Lines)
 m3 = mapping(color = :induced) 
-plt = data(df) * mapping(:Δl => "Distance from POI (path length cm)", :absk => "k", :u, :v) * visual(Arrows, arrowsize=10, lengthscale=1, linewidth = 1) 
+plt = data(df) * mapping(:Δl => "Distance from POI (path length cm)", :absk => "k", :u, :v) * visual(Arrows) 
 fig = Figure()
 h = draw!(fig[1,1], m * tracks; axis = (; width = 250, height = 250))
 for ax in fig.content 

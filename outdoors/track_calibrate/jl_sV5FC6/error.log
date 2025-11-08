@@ -1,0 +1,1 @@
+ErrorException("The extrinsic image in video /home/yakir/mnt/Data/Elin/Project_AllotheticVsIdiothetic_indoors/2022_02_LU_AllotheticVsIdiothetic_shift_dance_run01/20220308_calibration_B01_B05.mov at timestamp 103.0, is unusable (see files in jl_sV5FC6)! Please choose a different time point for the extrinsic image. Or try perhaps different `n_corners`, right now it's (4, 6).")

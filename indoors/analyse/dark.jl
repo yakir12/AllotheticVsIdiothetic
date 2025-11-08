@@ -236,6 +236,14 @@ CairoMakie.activate!()
 save(joinpath(output, "darkness 3 comparisons.pdf"), fig)
 
 
+###### straightness
+
+l1 = floor(Int, minimum(norm ∘ last, df.centered2poi_and_cropped))
+
+@transform! df :straightness = l1 ./ path_length_at.(:centered2poi_and_cropped, l1)
+
+CSV.write(joinpath(output, "straightness.csv"), select(df, [:run_id, :straightness]))
+
 
 # jhfasdjfhljasdhflhasjdf
 #

@@ -1,0 +1,1 @@
+ErrorException("The extrinsic image in video /home/yakir/mnt/Data/Elin/Project_AllotheticVsIdiothetic_indoors/2025_04_LU_AllotheticVsIdiothetic/20250407_calibration.MTS at timestamp 22.0, is unusable (see files in jl_nWgzMS)! Please choose a different time point for the extrinsic image. Or try perhaps different `n_corners`, right now it's (6, 9).")
