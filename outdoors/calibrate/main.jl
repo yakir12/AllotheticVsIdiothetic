@@ -8,6 +8,11 @@ rm.(filter(startswith("jl_"), readdir(".")), force = true, recursive = true)
 if isdir("tracks and calibrations")
     rm("tracks and calibrations", recursive=true)
 end
+if isdir("tracks")
+    rm("tracks", recursive=true)
+end
+if isdir("calibrations")
+    rm("calibrations", recursive=true)
+end
 
-main(data_path)
-# main(data_path, todo = ["20230112_mirror_dance01_spontaneous_ID29.MTS"])
+Fromage.only_calibrate(data_path, todo = ["20221124_mirror_dance10_spontaneous_Bela-Bela_23.MTS"])

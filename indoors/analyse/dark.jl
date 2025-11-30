@@ -190,6 +190,10 @@ CSV.write(joinpath(output, "light.csv"), pvalueslight)
 CSV.write(joinpath(output, "dance_by.csv"), pvaluesdance_by)
 CSV.write(joinpath(output, "at_run.csv"), pvaluesat_run)
 
+CSV.write(joinpath(output, "light_data.csv"), newlight)
+CSV.write(joinpath(output, "dance_by_data.csv"), newdance)
+CSV.write(joinpath(output, "at_run_data.csv"), newat_run)
+
 g1 = @subset light :light .== "dark"
 g2 = @subset light :light .== "remain"
 g3 = @subset dance_by :dance_by .≠ "no"

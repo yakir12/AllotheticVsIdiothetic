@@ -36,11 +36,11 @@ end
 
 const results_dir = "../track_calibrate/tracks and calibrations"
 
-bad_runs = (3, 4, 5, 6, 10, 20, 21, 22, 27, 28, 29, 30, 36, 39, 40, 41, 42, 45, 46, 51, 53, 55, 57, 58, 64, 68, 71, 73, 75, 76, 77, 79, 81, 82, 83, 84, 85, 86, 88, 89, 92, 93, 94, 95, 96, 97, 116, 120)
+# bad_runs = (3, 4, 5, 6, 10, 20, 21, 22, 27, 28, 29, 30, 36, 39, 40, 41, 42, 45, 46, 51, 53, 55, 57, 58, 64, 68, 71, 73, 75, 76, 77, 79, 81, 82, 83, 84, 85, 86, 88, 89, 92, 93, 94, 95, 96, 97, 116, 120)
 
 runs = @chain joinpath(results_dir, "runs.csv") begin
     CSV.read(DataFrame)
-    @rsubset :run_id ∉ bad_runs
+    # @rsubset :run_id ∉ bad_runs
     @select Not(:runs_path, :start_location, :fps, :target_width, :runs_file, :window_size)
     @subset :light .== "shift"
     @transform :tij_file = joinpath.(results_dir, :tij_file)
@@ -99,7 +99,7 @@ end
 
 ############ plot the tracks to check validity
 
-fig = (pregrouped(runs.smooth => first => "X (cm)", runs.smooth => last => "Y (cm)", layout = runs.run_id => nonnumeric) * visual(Lines; color = :red) + pregrouped(runs.xy => first => "X (cm)", runs.xy => last => "Y (cm)", layout = runs.run_id => nonnumeric) * visual(Lines)) |> draw(; axis = (; width = 400, height = 400, limits = ((-4l, 4l), (-4l, 4l))));
+fig = (pregrouped(runs.smooth => first => "X (cm)", runs.smooth => last => "Y (cm)", layout = runs.run_id => nonnumeric) * visual(Lines; color = :red) + pregrouped(runs.xy => first => "X (cm)", runs.xy => last => "Y (cm)", layout = runs.run_id => nonnumeric) * visual(Lines)) |> draw(; axis = (; aspect = DataAspect()))#; axis = (; width = 400, height = 400, limits = ((-4l, 4l), (-4l, 4l))));
 save(joinpath(output, "overview_shift.png"), fig)
 
 ################################################### 10 random tracks

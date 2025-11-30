@@ -202,17 +202,29 @@ end
 
 fig = Figure(size = (12cm, 11cm))
 row1 = fig[1,1] = GridLayout()
-xlimits = (-5, 95)
+xlimits = (-5, 105)
+ylimits = (-50, 180*4 + 50)
+yticks = 0:180:180*4
 width = 5
 relative = 0.1
-ax11 = Axis(row1[1,1], ylabel = "Absolut total rotation (°)", xticks = 0:30:90, yticks = 0:180:2000, limits = (xlimits, nothing))
+ax11 = Axis(row1[1,1]; ylabel = "Absolut total rotation (°)", xticks = ([0:30:90; 100], [string.(0:30:90); "dark"]), yticks, limits = (xlimits, ylimits))
 boxplot!(ax11, df.elevation, df.abs_total; width, color = :gray, show_outliers = false)
-ax12 = Axis(row1[1,2], yticks = 0:180:2000, limits = (xlimits, nothing), xticks = ([45], ["dark"]))
-boxplot!(ax12, 45ones(nrow(dark)), dark.abs_total; width = width/relative, color = :gray, show_outliers = false)
-linkyaxes!(ax11, ax12)
-hidexdecorations!(ax12, ticklabels = false, ticks = false)
-hideydecorations!(ax12, grid = false, minorgrid = false)
-colsize!(row1, 2, Relative(relative))
+# ax12 = Axis(row1[1,2], yticks = 0:180:2000, limits = (xlimits, ylimits), xticks = ([45], ["dark"]))
+boxplot!(ax11, 100ones(nrow(dark)), dark.abs_total; width, color = :gray, show_outliers = false)
+# linkyaxes!(ax11, ax12)
+# hidexdecorations!(ax12, ticklabels = false, ticks = false)
+# hideydecorations!(ax12, grid = false, minorgrid = false)
+# colsize!(row1, 2, Relative(relative))
+
+ax112 = Axis(row1[1,1], yaxisposition = :right, yticks = yticks/yticks[end], limits = (xlimits, ylimits ./ yticks[end]), ylabel = "R-value")
+hidespines!(ax112)
+hidexdecorations!(ax112)
+# linkyaxes!(ax11, ax112)
+
+df99 = CSV.read("Elevations_test_results.csv", DataFrame)
+df99[end, :condition] = "100"
+@transform! df99 :condition = parse.(Int, :condition)
+scatter!(ax112, df99.condition, df99."R-value")
 
 
 row2 = fig[2,1] = GridLayout()

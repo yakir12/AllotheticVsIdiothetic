@@ -1,0 +1,3 @@
+ErrorException("The extrinsic image in video /home/yakir/mnt/Data/Elin/Project_AllotheticVsIdiothetic_outdoors/20231115_10_dances_02_midroll_B03.MTS at timestamp 254.292, is unusable (see files in jl_CvwrNp)! Please choose a different time point for the extrinsic image. Or try perhaps different `n_corners`, right now it's (4, 6).")
+Something went wrong with the calibration in video /home/yakir/mnt/Data/Elin/Project_AllotheticVsIdiothetic_outdoors/20231115_10_dances_02_midroll_B03.MTS at timestamp 254.292 (see files in jl_CvwrNp)!
+FILE: /home/yakir/mnt/Data/Elin/Project_AllotheticVsIdiothetic_outdoors/20231115_10_dances_02_midroll_B03.MTS
