@@ -1,3 +1,0 @@
-ErrorException("The extrinsic image in video /home/yakir/mnt/Data/Elin/Project_AllotheticVsIdiothetic_outdoors/20221124_mirror_dance10_midroll_Bela-Bela_21.MTS at timestamp 265.525, is unusable (see files in jl_LZ2DPM)! Please choose a different time point for the extrinsic image. Or try perhaps different `n_corners`, right now it's (4, 6).")
-Something went wrong with the calibration in video /home/yakir/mnt/Data/Elin/Project_AllotheticVsIdiothetic_outdoors/20221124_mirror_dance10_midroll_Bela-Bela_21.MTS at timestamp 265.525 (see files in jl_LZ2DPM)!
-FILE: /home/yakir/mnt/Data/Elin/Project_AllotheticVsIdiothetic_outdoors/20221124_mirror_dance10_midroll_Bela-Bela_21.MTS

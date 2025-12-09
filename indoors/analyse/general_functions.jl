@@ -1,7 +1,27 @@
+# ============================================================================
+# GENERAL TRAJECTORY PROCESSING FUNCTIONS
+# ============================================================================
+# Helper functions for cleaning, transforming, and standardizing movement
+# trajectories in animal tracking experiments.
+# ============================================================================
+
 const SV = SVector{2, Float64}
+
+# ============================================================================
+# TRAJECTORY CLEANING AND PROCESSING FUNCTIONS
+# ============================================================================
 
 ###
 
+"""
+    remove_loops(xy)
+
+Remove self-intersecting loops from trajectory by detecting intersection points
+and removing all points within the loop. This cleans trajectories where the
+animal retraces its path or makes tight circles.
+
+Returns trajectory with loop segments removed (keeps loops > 50 points).
+"""
 function remove_loops(xy)
     inds, _ = self_intersections(Point2f.(xy))
     rngs = splat(UnitRange).(Iterators.partition(inds, 2))
@@ -14,6 +34,18 @@ function remove_loops(xy)
     return xy[keep]
 end
 
+"""
+    glue_intervention!(xy, intervention::Real)
+
+Detect and correct spatial discontinuities caused by experimental interventions
+(e.g., sudden light shifts that cause brief disorientation). Identifies sudden
+jumps in position by comparing movement speeds before and after the intervention
+time (using mean + 2σ threshold), then shifts the post-intervention trajectory
+to reconnect it smoothly.
+
+Returns the magnitude of the detected jump (0.0 if no jump detected).
+Modifies xy in place.
+"""
 function glue_intervention!(xy, intervention::Real)
     h = 1
     diffs = diff(xy[Ti = 0.0 .. intervention + h])
@@ -34,6 +66,13 @@ function glue_intervention!(xy, intervention::Real)
     end
 end
 
+"""
+    sparseify(xy)
+
+Resample trajectory at uniform 0.5 second intervals using parametric splines.
+This converts irregularly sampled tracking data into evenly spaced points,
+making temporal analyses more straightforward.
+"""
 function sparseify(xy)
     spl = ParametricSpline(lookup(xy, Ti), stack(xy))
     # tl = round(Int, t[1]):round(Int, t[end])
@@ -42,6 +81,12 @@ function sparseify(xy)
     DimVector(SV.(spl.(tl)), Ti(tl))
 end
 
+"""
+    has_stops(ij)
+
+Check if trajectory contains consecutive duplicate positions (stops).
+Returns true if any two consecutive positions are identical.
+"""
 function has_stops(ij)
     for i in 2:length(ij)
         if ij[i] == ij[i - 1]
@@ -51,6 +96,12 @@ function has_stops(ij)
     return false
 end
 
+"""
+    remove_stops(ij)
+
+Remove consecutive duplicate positions from trajectory. This filters out
+frames where the animal was stationary, keeping only frames with movement.
+"""
 function remove_stops(ij)
     keep = [1]
     for i in 2:length(ij)
@@ -61,11 +112,25 @@ function remove_stops(ij)
     ij[keep]
 end
 
+"""
+    get_tij(file)
+
+Load tracking data from CSV file. Reads time (t), pixel row (i), and pixel
+column (j) coordinates. Returns DimVector with time dimension.
+"""
 function get_tij(file)
     tij = CSV.File(file)
     t = range(tij.t[1], tij.t[end], length = length(tij))
     pixels = DimVector(CameraCalibrations.RowCol.(tij.i, tij.j), Ti(t))
 end
+
+"""
+    smooth(xy)
+
+Apply smoothing spline to trajectory to reduce noise while preserving shape.
+Uses cubic spline (k=3) with smoothing parameter s=25. Resamples at higher
+temporal resolution (100x denser) for smoother curves.
+"""
 function smooth(xy)
     t = lookup(xy, Ti)
     spl = ParametricSpline(t, stack(xy), k = 3, s = 25)
@@ -73,11 +138,31 @@ function smooth(xy)
     DimVector(SV.(spl.(tl)), Ti(tl))
 end
 
+# ============================================================================
+# TRAJECTORY STANDARDIZATION FUNCTIONS
+# ============================================================================
+# Functions for normalizing trajectory position and orientation
+# ============================================================================
+
+"""
+    center2start(xy)
+
+Translate trajectory so starting position is at origin [0, 0].
+This standardizes trajectories for comparison regardless of where they began.
+"""
 function center2start(xy)
     trans = Translation(-first(xy))
     trans.(xy)
 end
 
+"""
+    intersection(orig, dir)
+
+Find intersection of a ray with unit circle. Used internally by cropto()
+to determine where trajectory crosses the radius threshold.
+
+Returns tuple (t1, t2) of ray parameters for near and far intersections.
+"""
 function intersection(orig, dir)
     b = -orig⋅dir
     disc = b^2 - orig⋅orig + 1
@@ -92,6 +177,13 @@ function intersection(orig, dir)
     return (Inf, Inf)
 end
 
+"""
+    cropto(xy, l)
+
+Crop trajectory at maximum distance l from origin. If trajectory extends beyond
+radius l, it is truncated at exactly distance l along the path direction.
+This ensures all trajectories have the same spatial scale for comparison.
+"""
 function cropto(xy, l)
     i = findfirst(>(l) ∘ norm, xy)
     isnothing(i) && return copy(xy)
@@ -105,6 +197,13 @@ function cropto(xy, l)
     return cropped
 end
 
+"""
+    rotate2poi(xy, poi)
+
+Rotate trajectory so the Point Of Interest (POI) is at 90° (north/up).
+This aligns all trajectories to a common reference frame where the experimental
+intervention or behavioral event occurs at the same angular position.
+"""
 function rotate2poi(xy, poi)
     p2 = xy[Ti = Near(poi)]
     θ = π/2 - atan(reverse(p2)...)
@@ -112,10 +211,20 @@ function rotate2poi(xy, poi)
     rot.(xy)
 end
 
+"""
+    center2poi_and_crop(xy, poi)
+
+Center trajectory on POI position and return only the post-POI segment.
+This isolates the behavioral response after the experimental intervention.
+"""
 function center2poi_and_crop(xy, poi)
     trans = Translation(-xy[Ti = Near(poi)])
     trans.(xy[Ti = poi..Inf])
 end
+
+# ============================================================================
+# CAMERA CALIBRATION AND COORDINATE TRANSFORMATION
+# ============================================================================
 
 ###
 
@@ -130,6 +239,13 @@ end
 #     return ys
 # end
 
+"""
+    get_calibration(file)
+
+Load camera calibration from file and return rectification function.
+The returned function maps pixel coordinates (i,j) to real-world coordinates (x,y)
+in centimeters, correcting for lens distortion and camera perspective.
+"""
 function get_calibration(file)
     c = CameraCalibrations.load(file)
     f = rectification(c, findfirst(contains("extrinsic"), c.files))
@@ -137,6 +253,16 @@ function get_calibration(file)
     return f
 end
 
+# ============================================================================
+# TIME CONVERSION UTILITIES
+# ============================================================================
+
+"""
+    tosecond(t)
+
+Convert various time representations to seconds (Float64).
+Handles Time objects, TimePeriod, and numeric seconds.
+"""
 tosecond(t::T) where {T <: TimePeriod} = t / convert(T, Dates.Second(1))
 tosecond(t::TimeType) = tosecond(t - Time(0))
 tosecond(sec::Real) = sec
@@ -166,6 +292,12 @@ tosecond(sec::Real) = sec
 # end
 #
 
+"""
+    impute_poi_time(xy)
+
+Estimate Point Of Interest time by detecting when animal has moved more than
+10 cm from starting position. Used when POI time is not explicitly recorded.
+"""
 function impute_poi_time(xy)
     p1 = xy[1]
     for i in eachindex(xy)

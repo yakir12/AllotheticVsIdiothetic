@@ -1,3 +1,0 @@
-AssertionError("No checkers were detected in any of the images, perhaps try a different `n_corners` (e.g. not (4, 6))")
-Something went wrong with the calibration in video /home/yakir/mnt/Data/Elin/Project_AllotheticVsIdiothetic_outdoors/20231116_02_dances_04_spontaneous_B21.MTS at timestamp 214.241 (see files in jl_9Ak93q)!
-FILE: /home/yakir/mnt/Data/Elin/Project_AllotheticVsIdiothetic_outdoors/20231116_02_dances_04_spontaneous_B21.MTS

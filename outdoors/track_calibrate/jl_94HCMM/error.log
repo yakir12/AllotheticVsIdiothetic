@@ -1,3 +1,0 @@
-ErrorException("The extrinsic image in video /home/yakir/mnt/Data/Elin/Project_AllotheticVsIdiothetic_outdoors/20230112_mirror_dance02_ID34.MTS at timestamp 199.03, is unusable (see files in jl_94HCMM)! Please choose a different time point for the extrinsic image. Or try perhaps different `n_corners`, right now it's (4, 6).")
-Something went wrong with the calibration in video /home/yakir/mnt/Data/Elin/Project_AllotheticVsIdiothetic_outdoors/20230112_mirror_dance02_ID34.MTS at timestamp 199.03 (see files in jl_94HCMM)!
-FILE: /home/yakir/mnt/Data/Elin/Project_AllotheticVsIdiothetic_outdoors/20230112_mirror_dance02_ID34.MTS
