@@ -17,45 +17,15 @@
 #   5. Generate publication-quality figures
 # ============================================================================
 
-using AlgebraOfGraphics, GLMakie, CairoMakie
-using GLM
-# using MultivariateStats
-using DataFramesMeta, Chain
-using HypothesisTests
-using GeometryBasics
-# using StatsBase, Graphs
-using Dates, LinearAlgebra, Statistics, Random
-using CSV, DataFrames, CameraCalibrations
-# using Interpolations
-using StaticArrays, Dierckx, CoordinateTransformations, Rotations
-# using OhMyThreads
+include("common_imports.jl")
 using LsqFit
-# using Optim
-using CategoricalArrays
-using Distributions
-# using IntervalSets
-# using QuadGK
 using BetaRegression
-using DimensionalData
-import DimensionalData:DimVector
-
-GLMakie.activate!()
 
 include("general_functions.jl")
 include("shift_functions.jl")
 
-# Maximum trajectory length in centimeters
-const l = 50
-
 # Prepare output directory for figures
-output = "shift"
-if isdir(output)
-    rm.(readdir(output; join = true))
-else
-    mkdir(output)
-end
-
-const results_dir = "../track_calibrate/tracks and calibrations"
+output = setup_output_dir("shift")
 
 # ============================================================================
 # SECTION 1: DATA LOADING AND MERGING
@@ -66,36 +36,10 @@ const results_dir = "../track_calibrate/tracks and calibrations"
 # ============================================================================
 
 # Load indoor experiment data (Lund location, LED stimulus)
-runs = @chain joinpath(results_dir, "runs.csv") begin
-    CSV.read(DataFrame)
-    @select Not(:runs_path, :start_location, :fps, :target_width, :runs_file, :window_size)
-    @subset :light .== "shift"  # Filter for light shift experiments only
-    @transform :tij_file = joinpath.(results_dir, :tij_file)
-    @transform :location = "Lund"
-end
-calibs = @chain joinpath(results_dir, "calibs.csv") begin
-    CSV.read(DataFrame)
-    @transform :calibration_file = joinpath.(results_dir, :calibration_id)
-    @transform :rectify = get_calibration.(:calibration_file)  # Create rectification function
-    @select Cols(:calibration_id, :rectify)
-end
-leftjoin!(runs, calibs, on = :calibration_id)
+runs = load_runs_and_calibs("../track_calibrate/tracks and calibrations"; filter_light="shift")
 
 # Load outdoor50 experiment data (Bela-Bela location, Sun stimulus)
-results_dir50 = "../../outdoors50/track_calibrate/tracks and calibrations"
-runs50 = @chain joinpath(results_dir50, "runs.csv") begin
-    CSV.read(DataFrame)
-    @select Not(:runs_path, :start_location, :fps, :target_width, :runs_file, :window_size)
-    @subset :light .== "shift"  # Filter for light shift experiments only
-    @transform :tij_file = joinpath.(results_dir50, :tij_file)
-end
-calibs50 = @chain joinpath(results_dir50, "calibs.csv") begin
-    CSV.read(DataFrame)
-    @transform :calibration_file = joinpath.(results_dir50, :calibration_id)
-    @transform :rectify = get_calibration.(:calibration_file)
-    @select Cols(:calibration_id, :rectify)
-end
-leftjoin!(runs50, calibs50, on = :calibration_id)
+runs50 = load_runs_and_calibs("../../outdoors50/track_calibrate/tracks and calibrations"; filter_light="shift")
 
 # Combine both datasets for comparative analysis
 runs = vcat(runs, runs50, cols = :union)
@@ -111,86 +55,30 @@ runs = vcat(runs, runs50, cols = :union)
 #   4. Feature extraction: fit logistic curves to turning behavior
 # ============================================================================
 
-@chain runs begin
-    @select! Not(:calibration_id)
-    # Identify spontaneous dances (vs induced dances)
-    @transform! :dance_spontaneous = .!ismissing.(:spontaneous_end)
-    @transform! :condition = string.(:light, " ", :dance_by, " ", :at_run)
-    @rtransform! :y2025 = Year(:start_datetime) == Year(2025) ? "2025" : "earlier"
-    @rename! :intervention = :poi
+# Identify spontaneous dances (vs induced dances) before processing
+@transform! runs :dance_spontaneous = .!ismissing.(:spontaneous_end)
 
-    # Load tracking data: time (t), pixel row (i), pixel column (j)
-    @transform! :pixels = get_tij.(:tij_file)
-    # Remove consecutive duplicate positions (stops)
-    @transform! :pixels = remove_stops.(:pixels)
-    # @aside @assert !any(has_stops, _.pixels) "some stops remain?!" # convert to a test
+# Apply standard trajectory processing pipeline with spontaneous dance handling
+process_trajectories!(runs;
+                      fix_intervention_jumps=true,
+                      handle_spontaneous=true)
 
-    # Rectify: convert pixel coordinates to real-world coordinates (cm)
-    @rtransform! :xy = :rectify.(:pixels)
+# Extract turning angle profile around POI (±5 to +15 cm path length)
+@transform! runs :θ = get_turn_profile.(:smooth, :poi)
 
-    # Fix discontinuities caused by experimental intervention (e.g., light shift)
-    # This detects sudden jumps in position and corrects subsequent trajectory
-    @aside @chain _ begin
-        @subset(:dance_by .≠ "disrupt"; view = true)
-        @transform! :jump = glue_intervention!.(:xy, :intervention)
-    end
-    # @aside @chain _ begin
-    #     @subset(:light .== "remain"; view = true)
-    #     @rtransform! :poi = impute_poi_time(:t, :xy)
-    # end
+# Fit logistic curve to turning behavior: θ(l) = L/(1 + exp(-k(l - x₀))) - y₀
+# Parameters: L = total turn, k = steepness, x₀ = inflection point, y₀ = offset
+@transform! runs $AsTable = fit_logistic.(:θ)
+transform!(runs, :ks => ByRow(identity) => [:L, :k, :x₀, :y₀])
+@rtransform! runs :θs = logistic.(:θ.l, :L, :k, :x₀, :y₀)
 
-    # Standardize POI (Point Of Interest) time across spontaneous and induced dances
-    @transform! :spontaneous_end = passmissing(tosecond).(:spontaneous_end)
-    @transform! :poi = coalesce.(:spontaneous_end, :intervention)
-    disallowmissing!(:poi)
-    @select! Not(:intervention)
-
-    # Clean trajectories: remove self-intersecting loops
-    @transform! :xy = remove_loops.(:xy)
-    # Resample trajectories at uniform 0.5s intervals using splines
-    @transform! :xy = sparseify.(:xy)
-    # Apply smoothing spline (reduces noise while preserving trajectory shape)
-    @transform! :smooth = smooth.(:xy)
-
-    # Standardize trajectory orientation and position:
-    # 1. Center to origin (starting position → [0,0])
-    @transform! :centered2start = center2start.(:smooth)
-    # 2. Crop to maximum radius of 50 cm
-    @transform! :cropped = cropto.(:centered2start, l)
-    # 3. Rotate so POI is at 90° (north)
-    @transform! :rotated2poi = rotate2poi.(:cropped, :poi)
-    # 4. Center on POI and crop to post-POI trajectory
-    @transform! :centered2poi_and_cropped = center2poi_and_crop.(:rotated2poi, :poi)
-
-    # Extract turning angle profile around POI (±5 to +15 cm path length)
-    @transform! :θ = get_turn_profile.(:smooth, :poi)
-
-    # Fit logistic curve to turning behavior: θ(l) = L/(1 + exp(-k(l - x₀))) - y₀
-    # Parameters: L = total turn, k = steepness, x₀ = inflection point, y₀ = offset
-    @transform! $AsTable = fit_logistic.(:θ)
-    transform!(:ks => ByRow(identity) => [:L, :k, :x₀, :y₀])
-    @rtransform! :θs = logistic.(:θ.l, :L, :k, :x₀, :y₀)
-
-    # Convert DimensionalData structures to plain arrays for downstream analysis
-    transform!([:pixels, :xy, :smooth, :centered2start, :cropped, :rotated2poi, :centered2poi_and_cropped] .=> ByRow(parent), renamecols = false)
-end
-
-
+# Convert to plain arrays
+transform!(runs, [:pixels, :xy, :smooth, :centered2start, :cropped, :rotated2poi, :centered2poi_and_cropped] .=> ByRow(parent), renamecols = false)
 # ============================================================================
 # SECTION 3: PRELIMINARY TESTS
 # ============================================================================
 # Quick exploratory tests on exit angle and turn magnitude
 # ============================================================================
-
-#### Test: Distribution of exit angles (induced vs spontaneous)
-df = @rtransform runs :exit_angle = splat(atand)(reverse(last(:centered2poi_and_cropped))) :forced = :dance_by ≠ "no"
-GLMakie.activate!()
-data(df) * mapping(:exit_angle, col = :forced) * visual(Hist) |> draw()
-
-#### Test: Binary logistic regression - do forced dances exit at larger angles?
-df = @rtransform runs :larger_angle = abs(splat(atan)(reverse(last(:centered2poi_and_cropped)))) > π/4 :forced = :dance_by ≠ "no"
-m = glm(@formula(larger_angle ~ forced), df, Binomial())
-
 
 #### Additional tests
 
@@ -211,17 +99,14 @@ m = glm(@formula(larger_angle ~ forced), df, Binomial())
 
 ############ Overview: Plot all tracks to visually check data quality
 
-fig = (pregrouped(runs.smooth => first => "X (cm)", runs.smooth => last => "Y (cm)", layout = runs.run_id => nonnumeric) * visual(Lines; color = :red) + pregrouped(runs.xy => first => "X (cm)", runs.xy => last => "Y (cm)", layout = runs.run_id => nonnumeric) * visual(Lines)) |> draw(; axis = (; width = 400, height = 400, limits = ((-l, l), (-l, l))));
-GLMakie.activate!()
-save(joinpath(output, "overview_shift.png"), fig)
-CairoMakie.activate!()
-save(joinpath(output, "overview_shift.pdf"), fig)
+fig = (pregrouped(runs.smooth => first => "X (cm)", runs.smooth => last => "Y (cm)", layout = runs.run_id => nonnumeric) * visual(Lines; color = :red) + pregrouped(runs.xy => first => "X (cm)", runs.xy => last => "Y (cm)", layout = runs.run_id => nonnumeric) * visual(Lines)) |> draw(; axis = (; width = 400, height = 400, limits = ((-MAX_TRAJECTORY_LENGTH, MAX_TRAJECTORY_LENGTH), (-MAX_TRAJECTORY_LENGTH, MAX_TRAJECTORY_LENGTH))));
+save_figure(fig, output, "overview_shift")
 
 ############ Figure 1a-c: Sample trajectories (10 per condition)
 
 n = 10
 df = @chain runs begin
-    @subset norm.(last.(:cropped)) .≈ l
+    @subset norm.(last.(:cropped)) .≈ MAX_TRAJECTORY_LENGTH
     @groupby :dance_by
     @transform :n = 1:length(:dance_by)
     @subset :n .≤ n
@@ -229,22 +114,18 @@ end
 @assert all(==(n), combine(groupby(df, :dance_by), nrow).nrow)
 
 fig = pregrouped(df.cropped => first => "X (cm)", df.cropped => last => "Y (cm)", col = df.dance_by) * visual(Lines) |> draw(; axis = (; width = 400, height = 400))
-for ax in fig.figure.content 
+for ax in fig.figure.content
     if ax isa Axis
-        for r  in (30, l)
+        for r  in (30, MAX_TRAJECTORY_LENGTH)
             lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
         end
     end
 end
 
-
-GLMakie.activate!()
-save(joinpath(output, "figure1a.png"), fig)
-CairoMakie.activate!()
-save(joinpath(output, "figure1a.pdf"), fig)
+save_figure(fig, output, "figure1a")
 
 fig = pregrouped(df.rotated2poi => first => "X (cm)", df.rotated2poi => last => "Y (cm)", col = df.dance_by) * visual(Lines) |> draw(; axis = (; width = 400, height = 400))
-for ax in fig.figure.content 
+for ax in fig.figure.content
     if ax isa Axis
         for r  in (30, 50)
             lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
@@ -252,14 +133,11 @@ for ax in fig.figure.content
     end
 end
 
-GLMakie.activate!()
-save(joinpath(output, "figure1b.png"), fig)
-CairoMakie.activate!()
-save(joinpath(output, "figure1b.pdf"), fig)
+save_figure(fig, output, "figure1b")
 
 df2 = stack(select(df, [:cropped, :dance_by, :rotated2poi]), [:cropped, :rotated2poi])
 fig = pregrouped(df2.value => first => "X (cm)", df2.value => last => "Y (cm)", col = df2.dance_by, row = df2.variable => renamer("cropped" => "unrotated", "rotated2poi" => "rotated")) * visual(Lines) |> draw(; axis = (; width = 400, height = 400))
-for ax in fig.figure.content 
+for ax in fig.figure.content
     if ax isa Axis
         for r  in (30, 50)
             lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
@@ -267,10 +145,7 @@ for ax in fig.figure.content
     end
 end
 
-GLMakie.activate!()
-save(joinpath(output, "figure1c.png"), fig)
-CairoMakie.activate!()
-save(joinpath(output, "figure1c.pdf"), fig)
+save_figure(fig, output, "figure1c")
 
 # ============================================================================
 # SECTION 5: STATISTICAL ANALYSIS - TURNING BEHAVIOR
@@ -299,13 +174,10 @@ end
 ############ Figure 5: Arrow plot summarizing turn parameters
 
 
-plt = data(df) * mapping(:Δl => "Distance from POI (path length cm)", :absk => "k", :u, :v, row = :location, col = :dance_by, color = :Δθ => rad2deg => "Total turn") * visual(Arrows2D) 
+plt = data(df) * mapping(:Δl => "Distance from POI (path length cm)", :absk => "k", :u, :v, row = :location, col = :dance_by, color = :Δθ => rad2deg => "Total turn") * visual(Arrows2D)
 fig = draw(plt, scales(Color = (; colormap = :cyclic_wrwbw_40_90_c42_n256_s25, colorrange = (-180, 180))); axis = (; width = 200, height = 200))
 
-GLMakie.activate!()
-save(joinpath(output, "figure5.png"), fig)
-CairoMakie.activate!()
-save(joinpath(output, "figure5.pdf"), fig)
+save_figure(fig, output, "figure5")
 
 df2 = select(df, [:at_run, :dance_by, :L])
 @transform! df2 :L = round.(Int, rad2deg.(:L .+ π/2))
@@ -333,15 +205,12 @@ end
 ############ Figure 7: Rainclouds plot comparing turn steepness across locations
 
 # TODO: fix this
-plt = data(df2) * mapping(:Δl => "Distance from POI (path length cm)", :absk => "k", :u, :v, col = :dance_by, row = :at_run => nonnumeric, color = :Δθ => rad2deg => "Total turn") * visual(Arrows2D) 
+plt = data(df2) * mapping(:Δl => "Distance from POI (path length cm)", :absk => "k", :u, :v, col = :dance_by, row = :at_run => nonnumeric, color = :Δθ => rad2deg => "Total turn") * visual(Arrows2D)
 fig = draw(plt, scales(Color = (; colormap = :cyclic_wrwbw_40_90_c42_n256_s25, colorrange = (-180, 180))); axis = (; width = 200, height = 200))
 
 
-fig = data(df2) * mapping(:location, :absk => "k", col = :dance_by) * visual(RainClouds, violin_limits = extrema) |> draw(; axis = (; width = 200, height = 200)) 
-GLMakie.activate!()
-save(joinpath(output, "figure7.png"), fig)
-CairoMakie.activate!()
-save(joinpath(output, "figure7.pdf"), fig)
+fig = data(df2) * mapping(:location, :absk => "k", col = :dance_by) * visual(RainClouds, violin_limits = extrema) |> draw(; axis = (; width = 200, height = 200))
+save_figure(fig, output, "figure7")
 
 # ============================================================================
 # STATISTICAL MODELS: Test hypotheses about turning behavior
@@ -387,7 +256,6 @@ m = BetaRegression.fit(BetaRegressionModel, @formula(Δθnormalized ~ dance_by),
 # SECTION 6: FIGURE GENERATION - TURN ANGLE PROFILES
 # ============================================================================
 
-
 #### Prepare turn angle profiles: normalize so POI is at distance=0, angle=0
 @chain df begin
     @rtransform! :lθshifted = parent(:θ.l .- :θ.l[Ti = Near(:poi)]) # Distance relative to POI
@@ -397,10 +265,7 @@ end
 ############ Figure 6: Turn angle profiles over path length
 fig = pregrouped(df.lθshifted => "Distance from POI (path length cm)", df.θnormalized => rad2deg) * visual(Lines) * mapping(color = df.location, col = df.dance_by, row = df.at_run => nonnumeric) |> draw()#; axis = (; width = 400, height = 400, ytickformat = "{:n}°", yticks = -180:90:270, limits = ((-5, 5), nothing)))
 
-GLMakie.activate!()
-save(joinpath(output, "figure6.png"), fig)
-CairoMakie.activate!()
-save(joinpath(output, "figure6.pdf"), fig)
+save_figure(fig, output, "figure6")
 
 # ============================================================================
 # SECTION 7: MAIN PUBLICATION FIGURES
@@ -450,11 +315,7 @@ draw!(fig[4,1], m3 * plt; axis = (; width = 250, height = 250, limits = ((-7, 17
 legend!(fig[1, 1], h, orientation = :horizontal, titleposition = :left)
 resize_to_layout!(fig)
 
-
-GLMakie.activate!()
-save(joinpath(output, "figure1.png"), fig)
-CairoMakie.activate!()
-save(joinpath(output, "figure1.pdf"), fig)
+save_figure(fig, output, "figure1")
 
 ############ Figure 2: Alternative layout grouping by location instead of induction
 m = mapping(color = df.induced => renamer(false => "Dance not induced", true => "Dance induced"), col = df.location => renamer("Lund" => "LED", "Bela-Bela" => "Sun") => "Stimulus")
@@ -476,9 +337,4 @@ draw!(fig[3,1], m3 * plt; axis = (; width = 250, height = 250, limits = ((-7, 17
 legend!(fig[0, 1], h, orientation = :horizontal, titleposition = :left)
 resize_to_layout!(fig)
 
-
-GLMakie.activate!()
-save(joinpath(output, "figure2.png"), fig)
-CairoMakie.activate!()
-save(joinpath(output, "figure2.pdf"), fig)
-
+save_figure(fig, output, "figure2")

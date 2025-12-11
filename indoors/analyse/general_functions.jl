@@ -308,3 +308,172 @@ function impute_poi_time(xy)
     return last(lookup(xy, Ti))
 end
 
+# ============================================================================
+# ANALYSIS PIPELINE HELPER FUNCTIONS
+# ============================================================================
+# High-level functions for common analysis workflows
+# ============================================================================
+
+# Trajectory processing parameters
+const SMOOTHING_K = 3        # Spline degree
+const SMOOTHING_S = 25       # Smoothing parameter
+const RESAMPLE_INTERVAL = 0.5 # Seconds
+const MAX_TRAJECTORY_LENGTH = 50  # Centimeters
+
+"""
+    setup_output_dir(name)
+
+Create or clear output directory for analysis results.
+If directory exists, removes all contents. If not, creates it.
+
+Returns the directory name.
+"""
+function setup_output_dir(name)
+    if isdir(name)
+        rm.(readdir(name; join = true))
+    else
+        mkdir(name)
+    end
+    return name
+end
+
+"""
+    save_figure(fig, output_dir, filename)
+
+Save figure in both PNG (GLMakie) and PDF (CairoMakie) formats.
+Filename should not include extension - both .png and .pdf will be created.
+
+Returns the figure object.
+"""
+function save_figure(fig, output_dir, filename)
+    GLMakie.activate!()
+    save(joinpath(output_dir, "$filename.png"), fig)
+    CairoMakie.activate!()
+    save(joinpath(output_dir, "$filename.pdf"), fig)
+    return fig
+end
+
+"""
+    load_runs_and_calibs(results_dir; filter_light=nothing, exclude_spontaneous=false)
+
+Load tracking data and calibrations, joining them together.
+
+Parameters:
+- results_dir: Path to "tracks and calibrations" directory
+- filter_light: If specified, filter for this light condition (e.g., "shift", "dark", "remain")
+- exclude_spontaneous: If true, exclude spontaneous dances (keep only induced)
+
+Returns DataFrame with runs and calibration data joined.
+"""
+function load_runs_and_calibs(results_dir; filter_light=nothing, exclude_spontaneous=false)
+    runs = @chain joinpath(results_dir, "runs.csv") begin
+        CSV.read(DataFrame)
+        @select Not(:runs_path, :start_location, :fps, :target_width, :runs_file, :window_size)
+        @transform :tij_file = joinpath.(results_dir, :tij_file)
+    end
+
+    if !isnothing(filter_light)
+        @subset!(runs, :light .== filter_light)
+    end
+
+    if exclude_spontaneous
+        @subset!(runs, ismissing.(:spontaneous_end))
+    end
+
+    calibs = @chain joinpath(results_dir, "calibs.csv") begin
+        CSV.read(DataFrame)
+        @transform :calibration_file = joinpath.(results_dir, :calibration_id)
+        @transform :rectify = get_calibration.(:calibration_file)
+        @select Cols(:calibration_id, :rectify)
+    end
+
+    leftjoin!(runs, calibs, on = :calibration_id)
+    @select! runs Not(:calibration_id)
+    return runs
+end
+
+"""
+    process_trajectories!(df;
+                          fix_intervention_jumps=true,
+                          impute_poi_for_remain=false,
+                          handle_spontaneous=false,
+                          l=MAX_TRAJECTORY_LENGTH)
+
+Apply standard trajectory processing pipeline in-place.
+
+Processing steps:
+1. Load pixel coordinates and convert to real-world (cm)
+2. Remove stops (consecutive duplicate positions)
+3. Fix discontinuities at intervention time (optional)
+4. Impute POI time for "remain" condition (optional)
+5. Handle spontaneous dances (optional)
+6. Remove self-intersecting loops
+7. Resample at uniform intervals
+8. Smooth with spline
+9. Center, crop, and rotate trajectories
+
+Parameters:
+- df: DataFrame with tracking data (modified in place)
+- fix_intervention_jumps: Detect and correct spatial jumps at intervention
+- impute_poi_for_remain: For "remain" light condition, estimate POI time
+- handle_spontaneous: Process spontaneous dance timing
+- l: Maximum trajectory length in cm
+
+Returns the modified DataFrame.
+"""
+function process_trajectories!(df;
+        fix_intervention_jumps=true,
+        impute_poi_for_remain=false,
+        handle_spontaneous=false,
+        l=MAX_TRAJECTORY_LENGTH)
+    @chain df begin
+        @transform! :condition = string.(:light, " ", :dance_by, " ", :at_run)
+        @rtransform! :y2025 = Year(:start_datetime) == Year(2025) ? "2025" : "earlier"
+        @rename! :intervention = :poi
+
+        # Load and clean pixel data
+        @transform! :pixels = get_tij.(:tij_file)
+        @transform! :pixels = remove_stops.(:pixels)
+        @rtransform! :xy = :rectify.(:pixels)
+    end
+
+    # Optional: fix intervention discontinuities
+    if fix_intervention_jumps
+        @chain df begin
+            @subset(:dance_by .≠ "no"; view = true)
+            @transform! :jump = glue_intervention!.(:xy, :intervention)
+        end
+    end
+
+    # Optional: impute POI for "remain" condition
+    if impute_poi_for_remain
+        @chain df begin
+            @subset(:light .== "remain"; view = true)
+            @transform! :intervention = impute_poi_time.(:xy)
+        end
+    end
+
+    # Optional: handle spontaneous dances
+    if handle_spontaneous
+        @transform! df :spontaneous_end = passmissing(tosecond).(:spontaneous_end)
+        @transform! df :poi = coalesce.(:spontaneous_end, :intervention)
+    else
+        @transform! df :poi = :intervention
+    end
+
+    @chain df begin
+        disallowmissing!(:poi)
+        @select! Not(:intervention)
+
+        # Clean and standardize trajectories
+        @transform! :xy = remove_loops.(:xy)
+        @transform! :xy = sparseify.(:xy)
+        @transform! :smooth = smooth.(:xy)
+        @transform! :centered2start = center2start.(:smooth)
+        @transform! :cropped = cropto.(:centered2start, l)
+        @transform! :rotated2poi = rotate2poi.(:cropped, :poi)
+        @transform! :centered2poi_and_cropped = center2poi_and_crop.(:rotated2poi, :poi)
+
+    end
+end
+

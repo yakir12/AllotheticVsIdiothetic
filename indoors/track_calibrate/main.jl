@@ -7,4 +7,4 @@ if isdir("tracks and calibrations")
     rm("tracks and calibrations", recursive=true)
 end
 
-main(data_path; delim = ';')
+main(data_path)
