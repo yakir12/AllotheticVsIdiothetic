@@ -31,9 +31,18 @@ end
 end
 
 for file in ["runs", "calibs"]
-    files = joinpath.(home, ["Project_AllotheticVsIdiothetic_indoors", "Project_AllotheticVsIdiothetic_outdoors_50cm"], "$file.csv")
-    dfs = CSV.read.(files, DataFrame)
+    csv_sources = joinpath.(home, ["Project_AllotheticVsIdiothetic_indoors", "Project_AllotheticVsIdiothetic_outdoors_50cm"], "$file.csv")
+    dfs = DataFrame[]
+    for csv_source in csv_sources
+        _df = CSV.read(csv_source, DataFrame)
+        _df.csv_source .= csv_source
+        push!(dfs, _df)
+    end
     df = vcat(dfs..., cols = :union)
+    if file == "runs"
+        transform!(groupby(df, [:run_id, :csv_source]), groupindices => :temp_run_id)
+        rename!(select!(df, Not(:run_id)), :temp_run_id => :run_id)
+    end
     path_field = "$(file)_path"
     df[!, path_field] .= missing
     CSV.write(joinpath(home, target, "$file.csv"), df)
