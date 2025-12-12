@@ -6,6 +6,10 @@
 # Statistical inference: Parametric bootstrap with beta regression
 # ============================================================================
 
+# ============================================================================
+# GEOMETRIC CALCULATIONS
+# ============================================================================
+
 """
     path_length_at(xy, l1)
 
@@ -26,9 +30,48 @@ function path_length_at(xy, l1)
     return s
 end
 
+"""
+    get_exit_angle(xyp, r)
+
+Extract heading angle when trajectory first reaches radius r from origin.
+
+This captures the direction in which the beetle exits a circular region
+centered at the POI. Used to assess directional bias at multiple scales.
+
+Parameters:
+- xyp: Trajectory (post-POI, centered on POI)
+- r: Radius threshold (cm)
+
+Returns angle in radians, or missing if trajectory never reaches radius r.
+"""
+function get_exit_angle(xyp, r)
+    i = findfirst(≥(r) ∘ norm, xyp)
+    if isnothing(i)
+        return missing
+    end
+    x, y = xyp[i]
+    atan(y, x)  # Angle in radians
+end
+
 # ============================================================================
-# CIRCULAR STATISTICS - CRITICAL VALUES
+# CIRCULAR STATISTICS
 # ============================================================================
+
+"""
+    mean_resultant_vector(θ)
+
+Compute mean resultant vector length from a set of angles.
+
+This is the primary measure of directional consistency:
+- r̄ = 0: angles uniformly distributed (no preferred direction)
+- r̄ = 1: all angles identical (perfect consensus)
+- 0 < r̄ < 1: partial directional bias
+
+Method: Represent each angle as unit vector, compute vector mean, take length.
+"""
+function mean_resultant_vector(θ)
+    norm(mean(SV ∘ sincos, θ))
+end
 
 """
     critical_r(n, p = 0.95)
@@ -79,27 +122,7 @@ function critical_r̄(n, p, nn = 10^7)
 end
 
 # ============================================================================
-# CIRCULAR STATISTICS - MEAN RESULTANT VECTOR
-# ============================================================================
-
-"""
-    mean_resultant_vector(θ)
-
-Compute mean resultant vector length from a set of angles.
-
-This is the primary measure of directional consistency:
-- r̄ = 0: angles uniformly distributed (no preferred direction)
-- r̄ = 1: all angles identical (perfect consensus)
-- 0 < r̄ < 1: partial directional bias
-
-Method: Represent each angle as unit vector, compute vector mean, take length.
-"""
-function mean_resultant_vector(θ)
-    norm(mean(SV ∘ sincos, θ))
-end
-
-# ============================================================================
-# PARAMETRIC BOOTSTRAP FOR CONFIDENCE INTERVALS
+# BOOTSTRAP INFERENCE
 # ============================================================================
 
 """
@@ -247,7 +270,7 @@ end
 # end
 
 # ============================================================================
-# P-VALUE FORMATTING AND SUMMARY STATISTICS
+# STATISTICAL UTILITIES
 # ============================================================================
 
 """
@@ -292,29 +315,68 @@ function stats(x)
 end
 
 # ============================================================================
-# EXIT ANGLE EXTRACTION
+# HIGH-LEVEL ANALYSIS FUNCTIONS
 # ============================================================================
 
 """
-    get_exit_angle(xyp, r)
+    analyze_factor_bootstrap(df, factor; n_radii=100, n_bootstrap=10_000)
 
-Extract heading angle when trajectory first reaches radius r from origin.
+Perform bootstrap analysis for a single experimental factor.
 
-This captures the direction in which the beetle exits a circular region
-centered at the POI. Used to assess directional bias at multiple scales.
+This function encapsulates the complete workflow for testing differences in
+directional consistency (mean resultant vector length) across experimental
+conditions using parametric bootstrap with beta regression.
+
+Workflow:
+1. Create high-resolution prediction grid across radii
+2. Run parametric bootstrap (default: 10,000 resamples)
+3. Fit beta regression: mean_resultant_vector ~ factor + r
+4. Extract 95% confidence intervals from bootstrap distribution
+5. Compute p-value statistics across bootstrap resamples
 
 Parameters:
-- xyp: Trajectory (post-POI, centered on POI)
-- r: Radius threshold (cm)
+- df: DataFrame with columns: mean_resultant_vector, r (radii), factor, color
+- factor: Symbol for experimental factor (:light, :dance_by, :at_run)
+- n_radii: Number of radius points for smooth prediction curves (default: 100)
+- n_bootstrap: Number of bootstrap resamples (default: 10,000)
 
-Returns angle in radians, or missing if trajectory never reaches radius r.
+Returns:
+- newdata: DataFrame with interpolated predictions and confidence bands
+  Columns: factor levels, r, color, mean_resultant_vector, lower, upper
+- pvalues: DataFrame with bootstrap p-value distributions
+  Columns: source (parameter names), proportion, Q2.5, median, Q97.5, mode, mean
 """
-function get_exit_angle(xyp, r)
-    i = findfirst(≥(r) ∘ norm, xyp)
-    if isnothing(i)
-        return missing
-    end
-    x, y = xyp[i]
-    atan(y, x)  # Angle in radians
-end
+function analyze_factor_bootstrap(df, factor; n_radii=100, n_bootstrap=10_000)
+    # Construct beta regression formula
+    fm = FormulaTerm(Term(:mean_resultant_vector), (Term(factor), Term(:r)))
 
+    # Create prediction grid with high resolution for smooth curves
+    rl_range = extrema(df.r[1])
+    rl2 = range(rl_range..., n_radii)
+    newdata = combine(groupby(df, factor),
+                     :r => first ∘ first => :r,
+                     :color => first => :color)
+    newdata.r .= Ref(rl2)
+    newdata = flatten(newdata, :r)
+    newdata.mean_resultant_vector .= 0.0
+
+    # Run bootstrap and extract confidence intervals
+    pc, c = bootstrap(df, fm, newdata, [factor])
+    select!(pc, Not(Symbol("(Precision)")))
+
+    # Extract 2.5%, 50%, 97.5% quantiles for confidence bands
+    y = quantile.(skipmissing.(eachrow(c)), Ref([0.025, 0.5, 0.975]))
+    newdata.lower .= getindex.(y, 1)
+    newdata.mean_resultant_vector .= getindex.(y, 2)
+    newdata.upper .= getindex.(y, 3)
+
+    # Format p-value statistics from bootstrap distribution
+    pvalues = combine(pc, DataFrames.All() .=> stats, renamecols = false)
+    pvalues.what = ["proportion", "Q2.5", "median", "Q97.5", "mode", "mean"]
+    df2 = stack(pvalues, Not(:what), variable_name = :source)
+    pvalues = combine(groupby(df2, :source),
+                     [:what, :value] => ((what, value) -> (; Pair.(Symbol.(what), value)...)) =>
+                     ["proportion", "Q2.5", "median", "Q97.5", "mode", "mean"])
+
+    return newdata, pvalues
+end

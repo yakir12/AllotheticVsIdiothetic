@@ -1,5 +1,0 @@
-We investigated how the beetles responded to shifting (flipping?) the ersatz sun by 180° as a function of the following two factors: 1) the number of previous runs they had completed beforehand, and 2) if we induced a dance in the beetles or not. The beetles seemed to turn by about 180° after we switched the azimuth of the sun. We charachterized these turns by the following three measures: 1) where in the path did the turn occur, 2) how many degrees was the total turn, and 3) how quickly did they turn. These measures were extracted from a logistic function that we fit to the path direction as a function of path length:
-
-L / (1 + exp(-k * (x - x₀))) - y₀
-
-Where L is the total turning angle, k is related to the sharpness of the turn, and x₀ is the path distance from the point where we switched the light. We found that while the number of previous runs had no effect on any of the three measures, inducing a dance had a significant effect on all three measures. The beetles turned more sharply, closer to the ligth swtich, and <something about the amount of turn>. 

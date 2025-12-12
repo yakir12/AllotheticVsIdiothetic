@@ -52,8 +52,11 @@ runs = load_runs_and_calibs("../track_calibrate/tracks and calibrations"; filter
 # Identify spontaneous dances (vs induced dances) before processing
 @transform! runs :dance_spontaneous = .!ismissing.(:spontaneous_end)
 
-# add another category of dance_by that codes the spontaneous dances
-@rtransform! runs :dance_by = :dance_spontaneous ? "spontaneous" : :dance_by
+# # add another category of dance_by that codes the spontaneous dances
+# @rtransform! runs :dance_by = :dance_spontaneous ? "spontaneous" : :dance_by
+
+# filter out all th eruns that have a spontaneous dance in them!
+@subset! runs .!:dance_spontaneous
 
 # Apply standard trajectory processing pipeline with spontaneous dance handling
 process_trajectories!(runs;

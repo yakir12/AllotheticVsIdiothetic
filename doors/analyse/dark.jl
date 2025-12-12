@@ -50,21 +50,10 @@ const results_dir = "../track_calibrate/tracks and calibrations"
 #   - Spontaneous dances (focus on controlled interventions)
 # ============================================================================
 
-runs = @chain joinpath(results_dir, "runs.csv") begin
-    CSV.read(DataFrame)
-    @select Not(:runs_path, :start_location, :fps, :target_width, :runs_file, :window_size)
-    @subset :light .≠ "shift"  # Exclude shift experiments
-    @subset! ismissing.(:spontaneous_end)  # Only induced dances, no spontaneous
-    @transform :tij_file = joinpath.(results_dir, :tij_file)
-    @transform :location = "Lund"
-end
-calibs = @chain joinpath(results_dir, "calibs.csv") begin
-    CSV.read(DataFrame)
-    @transform :calibration_file = joinpath.(results_dir, :calibration_id)
-    @transform :rectify = get_calibration.(:calibration_file)  # Create rectification function
-    @select Cols(:calibration_id, :rectify)
-end
-leftjoin!(runs, calibs, on = :calibration_id)
+runs = load_runs_and_calibs(results_dir; exclude_spontaneous=true)
+@subset! runs :light .≠ "shift"  # Exclude shift experiments
+# todo: exclude Spontaneous 
+# @transform! runs :location = "Lund"
 
 # ============================================================================
 # SECTION 2: TRAJECTORY PROCESSING PIPELINE
@@ -74,51 +63,14 @@ leftjoin!(runs, calibs, on = :calibration_id)
 # POI time must be imputed since there's no actual intervention.
 # ============================================================================
 
-@chain runs begin
-    @select! Not(:calibration_id)
-    @transform! :condition = string.(:light, " ", :dance_by, " ", :at_run)
-    @rtransform! :y2025 = Year(:start_datetime) == Year(2025) ? "2025" : "earlier"
-    @rename! :intervention = :poi
+process_trajectories!(runs;
+                      fix_intervention_jumps=true,
+                      impute_poi_for_remain=true)
 
-    # Load tracking data: time (t), pixel row (i), pixel column (j)
-    @transform! :pixels = get_tij.(:tij_file)
-    # Remove consecutive duplicate positions (stops)
-    @transform! :pixels = remove_stops.(:pixels)
-
-    # Rectify: convert pixel coordinates to real-world coordinates (cm)
-    @rtransform! :xy = :rectify.(:pixels)
-
-    # Fix discontinuities for induced dances (skip "no" dance condition)
-    @aside @chain _ begin
-        @subset(:dance_by .≠ "no"; view = true)
-        @transform! :jump = glue_intervention!.(:xy, :intervention)
-    end
-
-    # For "remain" condition: no actual intervention, so impute POI time
-    # (estimated as when beetle has moved 10 cm from start)
-    @aside @chain _ begin
-        @subset(:light .== "remain"; view = true)
-        @transform! :intervention = impute_poi_time.(:xy)
-    end
-
-    @transform! :poi = :intervention
-    disallowmissing!(:poi)
-    @select! Not(:intervention)
-
-    # Clean and standardize trajectories
-    @transform! :xy = remove_loops.(:xy)  # Remove self-intersecting loops
-    @transform! :xy = sparseify.(:xy)  # Resample at 0.5s intervals
-    @transform! :smooth = smooth.(:xy)  # Apply smoothing spline
-
-    # Standardize trajectory orientation and position:
-    @transform! :centered2start = center2start.(:smooth)  # Origin at start
-    @transform! :cropped = cropto.(:centered2start, MAX_TRAJECTORY_LENGTH)  # Crop to 50 cm radius
-    @transform! :rotated2poi = rotate2poi.(:cropped, :poi)  # POI at 90°
-    @transform! :centered2poi_and_cropped = center2poi_and_crop.(:rotated2poi, :poi)  # Origin at POI
-
-    # Convert DimensionalData structures to plain arrays
-    transform!([:pixels, :xy, :smooth, :centered2start, :cropped, :rotated2poi, :centered2poi_and_cropped] .=> ByRow(parent), renamecols = false)
-end
+# Convert DimensionalData structures to plain arrays for easier manipulation
+transform!(runs, [:pixels, :xy, :smooth, :centered2start, :cropped,
+                  :rotated2poi, :centered2poi_and_cropped] .=> ByRow(parent),
+           renamecols = false)
 
 # ============================================================================
 # SECTION 3: OVERVIEW FIGURES
@@ -195,39 +147,25 @@ at_run = @subset df :dance_by .== "no" :light .== "dark"  # Familiarity comparis
 @rtransform!(groupby(subset(dance_by, :dance_by => ByRow(≠("no")), view = true), :dance_by), :color = :dance_by == "disrupt" ? colors[2] : colors[3])  # Induced dances
 @transform!(subset(at_run, :at_run => ByRow(==(10)), view = true), :color = colors[4])  # 10th run
 
-"""
-    fun(lightdf, factor)
+# Compute mean resultant vector for each (factor, radius) combination
+light_summary = flatten(light, [:θs, :r])
+dance_by_summary = flatten(dance_by, [:θs, :r])
+at_run_summary = flatten(at_run, [:θs, :r])
 
-Perform bootstrap analysis for a single experimental factor.
-Fits beta regression model with formula: mean_resultant_vector ~ factor + r
-Returns interpolated predictions with confidence bands and p-value statistics.
-"""
-function fun(lightdf, factor)
-    fm = FormulaTerm(Term(:mean_resultant_vector), (Term(factor), Term(:r)))
-    newlight = combine(groupby(lightdf, factor), :r => first ∘ first => :r, :color => first => :color)
-    nr2 = 100
-    rl2 = range(extrema(rl)..., nr2)  # High-resolution grid for smooth curves
-    newlight.r .= Ref(rl2)
-    newlight = flatten(newlight, :r)
-    newlight.mean_resultant_vector .= 0.0
-    pc, c = bootstrap(lightdf, fm, newlight, [factor])  # 10,000 bootstrap resamples
-    select!(pc, Not(Symbol("(Precision)")))
-    # Extract 95% confidence intervals
-    y = quantile.(skipmissing.(eachrow(c)), Ref([0.025, 0.5, 0.975]))
-    newlight.lower .= getindex.(y, 1)
-    newlight.mean_resultant_vector .= getindex.(y, 2)
-    newlight.upper .= getindex.(y, 3)
-    pvalues = combine(pc, DataFrames.All() .=> stats, renamecols = false)
-    pvalues.what = ["proportion", "Q2.5", "median", "Q97.5", "mode", "mean"]
-    df2 = stack(pvalues, Not(:what), variable_name = :source)
-    pvalues = combine(groupby(df2, :source), [:what, :value] => ((what, value) -> (; Pair.(Symbol.(what), value)...)) => ["proportion", "Q2.5", "median", "Q97.5", "mode", "mean"])
-    return newlight, pvalues
-end
+light_summary = combine(groupby(light_summary, [:light, :r]),
+                       :θs => mean_resultant_vector => :mean_resultant_vector,
+                       :color => first => :color)
+dance_by_summary = combine(groupby(dance_by_summary, [:dance_by, :r]),
+                          :θs => mean_resultant_vector => :mean_resultant_vector,
+                          :color => first => :color)
+at_run_summary = combine(groupby(at_run_summary, [:at_run, :r]),
+                        :θs => mean_resultant_vector => :mean_resultant_vector,
+                        :color => first => :color)
 
 # Run bootstrap analysis for each of the three comparisons
-newlight, pvalueslight = fun(light, :light)
-newdance, pvaluesdance_by = fun(dance_by, :dance_by)
-newat_run, pvaluesat_run = fun(at_run, :at_run)
+newlight, pvalueslight = analyze_factor_bootstrap(light_summary, :light)
+newdance, pvaluesdance_by = analyze_factor_bootstrap(dance_by_summary, :dance_by)
+newat_run, pvaluesat_run = analyze_factor_bootstrap(at_run_summary, :at_run)
 
 # Save p-value tables to CSV
 CSV.write(joinpath(output, "light.csv"), pvalueslight)
