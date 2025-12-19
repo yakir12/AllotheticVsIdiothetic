@@ -3,8 +3,10 @@ using CSV, DataFrames, ProgressMeter
 const target = "AllotheticVsIdiothetic"
 const home = "/home/yakir/mnt/Data/Elin/"
 
+todo = ["Project_AllotheticVsIdiothetic_indoors", "Project_AllotheticVsIdiothetic_outdoors_50cm", "Project_AllotheticVsIdiothetic_outdoors"]
+
 dfs = DataFrame[]
-for path in ["Project_AllotheticVsIdiothetic_indoors", "Project_AllotheticVsIdiothetic_outdoors_50cm"], file in ["runs", "calibs"]
+for path in todo, file in ["runs", "calibs"]
     path_field = "$(file)_path"
     _df = CSV.read(joinpath(home, path, "$file.csv"), DataFrame, select = [path_field, "file"])
     if path_field ∈ names(_df)
@@ -31,19 +33,19 @@ end
 end
 
 for file in ["runs", "calibs"]
-    csv_sources = joinpath.(home, ["Project_AllotheticVsIdiothetic_indoors", "Project_AllotheticVsIdiothetic_outdoors_50cm"], "$file.csv")
-    dfs = DataFrame[]
+    csv_sources = joinpath.(home, todo, "$file.csv")
+    _dfs = DataFrame[]
     for csv_source in csv_sources
         _df = CSV.read(csv_source, DataFrame)
         _df.csv_source .= csv_source
-        push!(dfs, _df)
+        push!(_dfs, _df)
     end
-    df = vcat(dfs..., cols = :union)
+    _df = vcat(_dfs..., cols = :union)
     if file == "runs"
-        transform!(groupby(df, [:run_id, :csv_source]), groupindices => :temp_run_id)
-        rename!(select!(df, Not(:run_id)), :temp_run_id => :run_id)
+        transform!(groupby(_df, [:run_id, :csv_source]), groupindices => :temp_run_id)
+        rename!(select!(_df, Not(:run_id)), :temp_run_id => :run_id)
     end
     path_field = "$(file)_path"
-    df[!, path_field] .= missing
-    CSV.write(joinpath(home, target, "$file.csv"), df)
+    _df[!, path_field] .= missing
+    CSV.write(joinpath(home, target, "$file.csv"), _df)
 end

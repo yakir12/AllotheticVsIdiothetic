@@ -248,7 +248,7 @@ in centimeters, correcting for lens distortion and camera perspective.
 """
 function get_calibration(file)
     c = CameraCalibrations.load(file)
-    f = rectification(c, findfirst(contains("extrinsic"), c.files))
+    f = rectification(c, something(findfirst(contains("extrinsic"), c.files), 1))
     # fun(ij)::Function = f.(ij)
     return f
 end
@@ -266,6 +266,14 @@ Handles Time objects, TimePeriod, and numeric seconds.
 tosecond(t::T) where {T <: TimePeriod} = t / convert(T, Dates.Second(1))
 tosecond(t::TimeType) = tosecond(t - Time(0))
 tosecond(sec::Real) = sec
+function tosecond(str::AbstractString) 
+    if ',' ∈ str
+        parse_string_time.(split(str, ','))
+    else
+        parse_string_time(str)
+    end
+end
+parse_string_time(str::AbstractString) = ':' ∈ str ? tosecond(Time(str)) : parse(Float64, str)
 
 # function get_txy(tij_file, rectify)
 #     tij = CSV.File(joinpath(results_dir, tij_file))
@@ -365,11 +373,14 @@ Parameters:
 
 Returns DataFrame with runs and calibration data joined.
 """
-function load_runs_and_calibs(results_dir; filter_light=nothing, exclude_spontaneous=false)
+function load_runs_and_calibs(results_dir; filter_light=nothing, exclude_spontaneous=false, exclude_ignores = true)
     runs = @chain joinpath(results_dir, "runs.csv") begin
         CSV.read(DataFrame)
         @select Not(:runs_path, :start_location, :fps, :target_width, :runs_file, :window_size)
         @transform :tij_file = joinpath.(results_dir, :tij_file)
+    end
+    if exclude_ignores
+        @rsubset!(runs, ismissing(:ignore) || :ignore)
     end
 
     if !isnothing(filter_light)
@@ -455,7 +466,7 @@ function process_trajectories!(df;
 
     # Optional: handle spontaneous dances
     if handle_spontaneous
-        @transform! df :spontaneous_end = passmissing(tosecond).(:spontaneous_end)
+        @transform! df :spontaneous_end = passmissing(last ∘ tosecond).(:spontaneous_end)
         @transform! df :poi = coalesce.(:spontaneous_end, :intervention)
     else
         @transform! df :poi = :intervention

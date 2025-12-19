@@ -1,7 +1,0 @@
-[Fromage]
-# n_corners = "(3, 3)"
-n_corners = "(4, 6)"
-target_width = 40
-window_size = 20
-blur = 1
-radial_parameters = 0

@@ -36,7 +36,7 @@ output = setup_output_dir("shift")
 # ============================================================================
 
 # Load indoor experiment data (Lund location, LED stimulus)
-runs = load_runs_and_calibs("../track_calibrate/tracks and calibrations"; filter_light="shift")
+runs = load_runs_and_calibs("../track_calibrate/tracks and calibrations"; filter_light="shift", exclude_ignores = true)
 
 # ============================================================================
 # SECTION 2: TRAJECTORY PROCESSING PIPELINE
@@ -55,8 +55,9 @@ runs = load_runs_and_calibs("../track_calibrate/tracks and calibrations"; filter
 # # add another category of dance_by that codes the spontaneous dances
 # @rtransform! runs :dance_by = :dance_spontaneous ? "spontaneous" : :dance_by
 
-# filter out all th eruns that have a spontaneous dance in them!
-@subset! runs .!:dance_spontaneous
+# filter out all the runs that are dance=no and have a spontaneous dance in them
+@rsubset! runs !(:dance_by == "no" && :distance_cm ≠ 460 && :dance_spontaneous)
+@rtransform! runs :dance_by = (:distance_cm == 460 && :dance_by == "no" && :dance_spontaneous) ? "spontaneous" : :dance_by
 
 # Apply standard trajectory processing pipeline with spontaneous dance handling
 process_trajectories!(runs;
@@ -99,10 +100,28 @@ transform!(runs, [:pixels, :xy, :smooth, :centered2start, :cropped, :rotated2poi
 # SECTION 4: FIGURE GENERATION - TRAJECTORY VISUALIZATIONS
 # ============================================================================
 
+for row in eachrow(runs)
+    CSV.write(joinpath("shift", string(row.run_id, ".csv")), row.centered2poi_and_cropped)
+end
+
 ############ Overview: Plot all tracks to visually check data quality
 
 fig = (pregrouped(runs.smooth => first => "X (cm)", runs.smooth => last => "Y (cm)", layout = runs.run_id => nonnumeric) * visual(Lines; color = :red) + pregrouped(runs.xy => first => "X (cm)", runs.xy => last => "Y (cm)", layout = runs.run_id => nonnumeric) * visual(Lines)) |> draw(; axis = (; width = 400, height = 400, limits = ((-MAX_TRAJECTORY_LENGTH, MAX_TRAJECTORY_LENGTH), (-MAX_TRAJECTORY_LENGTH, MAX_TRAJECTORY_LENGTH))));
 save_figure(fig, output, "overview_shift")
+
+
+############################
+
+fig = pregrouped(runs.centered2poi_and_cropped => first => "X (cm)", runs.centered2poi_and_cropped => last => "Y (cm)", color = runs.dance_by => sorter(["no", "spontaneous", "hold", "disrupt"]), row = runs.distance_cm => nonnumeric, linestyle = runs.at_run => nonnumeric, col = runs.location => nonnumeric) * visual(Lines) |> draw(; axis = (; aspect = DataAspect()))
+
+for ax in fig.figure.content
+    if ax isa Axis
+        for r  in (30, MAX_TRAJECTORY_LENGTH)
+            lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
+        end
+    end
+end
+
 
 ############ Figure 1a-c: Sample trajectories (10 per condition)
 
@@ -354,3 +373,5 @@ legend!(fig[0, 1], h, orientation = :horizontal, titleposition = :left)
 resize_to_layout!(fig)
 
 save_figure(fig, output, "figure2")
+
+nothing

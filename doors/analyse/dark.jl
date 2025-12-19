@@ -52,6 +52,13 @@ const results_dir = "../track_calibrate/tracks and calibrations"
 
 runs = load_runs_and_calibs(results_dir; exclude_spontaneous=true)
 @subset! runs :light .≠ "shift"  # Exclude shift experiments
+
+# Identify spontaneous dances (vs induced dances) before processing
+@transform! runs :dance_spontaneous = .!ismissing.(:spontaneous_end)
+
+# filter out all the runs that are dance=no and have a spontaneous dance in them
+@rsubset! runs :dance_by ≠ "no" || !:dance_spontaneous
+
 # todo: exclude Spontaneous 
 # @transform! runs :location = "Lund"
 
