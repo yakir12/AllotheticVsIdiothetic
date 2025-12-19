@@ -6,9 +6,9 @@ x for distance_cm == 460: change the dance_by factor to yes and no, and if a run
 * add factor `at_run` to the statistical analysis in dark
 
 
-* exclude Spontaneous from Dark
-* help Elin with the description of the analysis and results of the statistical tests (of Shift) and Dark
-* switch b with c in "figure_dark.png"
+x exclude Spontaneous from Dark
+x help Elin with the description of the analysis and results of the statistical tests (of Shift) and Dark
+x switch b with c in "figure_dark.png"
 
 add factor `at_run` to the statistical analysis in shift
 add one figure that includes the factor `at_run` to the shift (indoors cause that's the only relevant one), and the dark

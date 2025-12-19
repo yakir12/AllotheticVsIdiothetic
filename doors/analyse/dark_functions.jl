@@ -307,11 +307,25 @@ Returns vector of formatted strings:
 These quantify uncertainty in p-values across bootstrap resamples.
 """
 function stats(x)
-    p = something(findfirst(>(0.05), sort!(x)), length(x))/length(x)
-    q1, med, q2 = quantile(x, [0.025, 0.5, 0.975])
-    mod = mode(x)
-    μ = mean(x)
-    [string(round(Int, 100p), "%"), formatp(q1), formatp(med), formatp(q2), formatp(mod), formatp(μ)]
+    p = count(>(0), x)/length(x)
+    if p > 0.5
+        1 - p
+    else
+        p
+    end
+    #
+    # q1, q2 = quantile(x, [0.025, 0.975])
+    # if q1 < 0 && q2 > 0
+    #     ">0.05"
+    # else
+    #     "<0.05"
+    # end
+    #
+    # p = something(findfirst(>(0.05), sort!(x)), length(x))/length(x)
+    # q1, med, q2 = quantile(x, [0.025, 0.5, 0.975])
+    # mod = mode(x)
+    # μ = mean(x)
+    # [string(round(Int, 100p), "%"), formatp(q1), formatp(med), formatp(q2), formatp(mod), formatp(μ)]
 end
 
 # ============================================================================
@@ -351,10 +365,10 @@ function analyze_factor_bootstrap(df, factor; n_radii=100, n_bootstrap=10_000)
     fm = FormulaTerm(Term(:mean_resultant_vector), (Term(factor), Term(:r)))
 
     # Create prediction grid with high resolution for smooth curves
-    rl_range = extrema(df.r[1])
+    rl_range = extrema(df.r)
     rl2 = range(rl_range..., n_radii)
     newdata = combine(groupby(df, factor),
-                     :r => first ∘ first => :r,
+                     :r => first => :r,
                      :color => first => :color)
     newdata.r .= Ref(rl2)
     newdata = flatten(newdata, :r)
@@ -372,11 +386,6 @@ function analyze_factor_bootstrap(df, factor; n_radii=100, n_bootstrap=10_000)
 
     # Format p-value statistics from bootstrap distribution
     pvalues = combine(pc, DataFrames.All() .=> stats, renamecols = false)
-    pvalues.what = ["proportion", "Q2.5", "median", "Q97.5", "mode", "mean"]
-    df2 = stack(pvalues, Not(:what), variable_name = :source)
-    pvalues = combine(groupby(df2, :source),
-                     [:what, :value] => ((what, value) -> (; Pair.(Symbol.(what), value)...)) =>
-                     ["proportion", "Q2.5", "median", "Q97.5", "mode", "mean"])
 
     return newdata, pvalues
 end

@@ -59,9 +59,6 @@ runs = load_runs_and_calibs(results_dir; exclude_spontaneous=true)
 # filter out all the runs that are dance=no and have a spontaneous dance in them
 @rsubset! runs :dance_by ≠ "no" || !:dance_spontaneous
 
-# todo: exclude Spontaneous 
-# @transform! runs :location = "Lund"
-
 # ============================================================================
 # SECTION 2: TRAJECTORY PROCESSING PIPELINE
 # ============================================================================
@@ -82,6 +79,46 @@ transform!(runs, [:pixels, :xy, :smooth, :centered2start, :cropped,
 # ============================================================================
 # SECTION 3: OVERVIEW FIGURES
 # ============================================================================
+
+@chain runs begin
+    @rtransform! :path_length = sum(norm, diff(:centered2poi_and_cropped))
+    @rtransform! :cord_length = norm(last(:centered2poi_and_cropped))
+    @transform! :tortuosity = :path_length ./ :cord_length
+    @transform! :straightness = 1 ./ :tortuosity
+    @rtransform! :exit_angle = splat(atan)(reverse(last(:centered2poi_and_cropped)))
+end
+
+# angular_mean(θs) = atand(mean(sind, θs), mean(cosd, θs))
+data(runs) * mapping(:straightness, :exit_angle, color = :condition) * visual(Scatter, strokewidth = 1, strokecolor = :white) 
+
+function summerize_stats(df)
+    n = nrow(df)
+    df2 = df[sample(1:n, n), :]
+    combine(groupby(df2, :condition), :exit_angle => mean_resultant_vector => :mean_resultant_vector, :straightness => mean => :straightness)
+end
+
+df = select(runs, :condition, :exit_angle, :straightness)
+n_boot = 100000
+d = Dict(c => Vector{Point2f}(undef, n_boot) for c in unique(runs.condition))
+for i in 1:n_boot
+    _df = summerize_stats(df)
+    for row in eachrow(_df)
+        d[row.condition][i] = Point2f(row.straightness, row.mean_resultant_vector)
+    end
+end
+fig, ax, pl = datashader(d; async = false)
+
+_df = select(runs, :condition, :exit_angle, :straightness)
+n_boot = 100000
+df = vcat((summerize_stats(_df) for _ in 1:n_boot)...)
+
+contour_layer = AlgebraOfGraphics.density() * visual(Contour; levels = 4, linewidth = 2)
+fig = data(df) * mapping(:straightness, :mean_resultant_vector, color = :condition) * contour_layer |> draw()
+save_figure(fig, output, "straightness with mean resultant vector")
+
+fig = data(df) * mapping(:straightness, :mean_resultant_vector, color = :condition) * visual(Scatter; markersize = 1, alpha = 0.1) |> draw()
+
+# data(combine(groupby(runs, :condition), :straightness => mean => :straightness, :exit_angle => angular_mean => :exit_angle)) * mapping(:straightness, :exit_angle, color = :condition) * visual(Scatter; markersize = 25, strokewidth = 2, strokecolor = :gray) |> draw()
 
 # Overview: Plot all tracks to visually check data quality
 fig = (pregrouped(runs.smooth => first => "X (cm)", runs.smooth => last => "Y (cm)", layout = runs.run_id => nonnumeric) * visual(Lines; color = :red) + pregrouped(runs.xy => first => "X (cm)", runs.xy => last => "Y (cm)", layout = runs.run_id => nonnumeric) * visual(Lines)) |> draw(; axis = (; width = 400, height = 400, limits = ((-MAX_TRAJECTORY_LENGTH, MAX_TRAJECTORY_LENGTH), (-MAX_TRAJECTORY_LENGTH, MAX_TRAJECTORY_LENGTH))));
@@ -159,13 +196,13 @@ light_summary = flatten(light, [:θs, :r])
 dance_by_summary = flatten(dance_by, [:θs, :r])
 at_run_summary = flatten(at_run, [:θs, :r])
 
-light_summary = combine(groupby(light_summary, [:light, :r]),
+light_summary1 = combine(groupby(light_summary, [:light, :r]),
                        :θs => mean_resultant_vector => :mean_resultant_vector,
                        :color => first => :color)
-dance_by_summary = combine(groupby(dance_by_summary, [:dance_by, :r]),
+dance_by_summary1 = combine(groupby(dance_by_summary, [:dance_by, :r]),
                           :θs => mean_resultant_vector => :mean_resultant_vector,
                           :color => first => :color)
-at_run_summary = combine(groupby(at_run_summary, [:at_run, :r]),
+at_run_summary1 = combine(groupby(at_run_summary, [:at_run, :r]),
                         :θs => mean_resultant_vector => :mean_resultant_vector,
                         :color => first => :color)
 
@@ -200,10 +237,10 @@ g4 = @subset at_run :at_run .== 10
 
 width = 250
 height = 250
-fig = Figure()
+fig = Figure();
 
 # Top panels: Labels for experimental conditions
-for (i, g) in enumerate((g1, g2, g3, g4))
+for (i, g) in enumerate((g1, g3, g2, g4))
     for (j, col) in enumerate([:light_styled, :dance_by_styled, :at_run_styled])
         Label(fig[j, i], g[1, col])
     end
@@ -218,7 +255,7 @@ end
 
 # Bottom panels: Mean resultant vector plots with confidence bands
 leg = []
-for (i, g) in enumerate((newlight, newdance, newat_run))
+for (i, g) in enumerate((newdance, newlight, newat_run))
     ax = Axis(fig[5, i + 1]; limits = ((5, 29),(0,1)), ylabel = "Resultant mean vector length",  height)
     for (k, g) in pairs(groupby(g, Not(:color, :lower, :mean_resultant_vector, :r, :upper)))
         b = band!(ax, g.r, g.lower, g.upper, color = RGBA(g.color[1], 0.25))  # Confidence band
@@ -230,13 +267,13 @@ for (i, g) in enumerate((newlight, newdance, newat_run))
     end
 end
 Label(fig[6,2:end], "Radial distance from POI (cm)")
-Legend(fig[5,1], last.(leg[[1,2,3,5,7]]), ["Lights turn off", "Lights remain on", "Dance induced by disruption", "Dance induced by holding", rich("at the 10", superscript("th"), " run")])
+Legend(fig[5,1], last.(leg[[2,1,3,5,7]]), ["Lights turn off", "Dance induced by disruption", "Dance induced by holding", "Lights remain on", rich("at the 10", superscript("th"), " run")])
 for i in 1:3
     rowgap!(fig.layout, i, 0)
 end
 resize_to_layout!(fig)
 
-save_figure(fig, output, "darkness 3 comparisons")
+save_figure(fig, output, "darkness 3 comparisons");
 
 # ============================================================================
 # SECTION 6: STRAIGHTNESS METRIC

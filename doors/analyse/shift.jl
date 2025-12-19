@@ -100,6 +100,7 @@ transform!(runs, [:pixels, :xy, :smooth, :centered2start, :cropped, :rotated2poi
 # SECTION 4: FIGURE GENERATION - TRAJECTORY VISUALIZATIONS
 # ============================================================================
 
+#### save for Elin
 for row in eachrow(runs)
     CSV.write(joinpath("shift", string(row.run_id, ".csv")), row.centered2poi_and_cropped)
 end
@@ -111,9 +112,9 @@ save_figure(fig, output, "overview_shift")
 
 
 ############################
+# overview figure
 
-fig = pregrouped(runs.centered2poi_and_cropped => first => "X (cm)", runs.centered2poi_and_cropped => last => "Y (cm)", color = runs.dance_by => sorter(["no", "spontaneous", "hold", "disrupt"]), row = runs.distance_cm => nonnumeric, linestyle = runs.at_run => nonnumeric, col = runs.location => nonnumeric) * visual(Lines) |> draw(; axis = (; aspect = DataAspect()))
-
+fig = pregrouped(runs.rotated2poi => first => "X (cm)", runs.rotated2poi => last => "Y (cm)", col = runs.dance_by => sorter(["no", "spontaneous", "hold", "disrupt"]), color = runs.distance_cm => nonnumeric, row = runs.at_run => nonnumeric, linestyle = runs.location => nonnumeric) * visual(Lines) |> draw(; axis = (; aspect = DataAspect()))
 for ax in fig.figure.content
     if ax isa Axis
         for r  in (30, MAX_TRAJECTORY_LENGTH)
