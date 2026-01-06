@@ -135,10 +135,10 @@ end
 @assert all(==(n), combine(groupby(df, :dance_by), nrow).nrow)
 
 fig = pregrouped(df.cropped => first => "X (cm)", df.cropped => last => "Y (cm)", col = df.dance_by, color = df.y2025) * visual(Lines) |> draw(; axis = (; width = 400, height = 400))
-for ax in fig.figure.content
-    if ax isa Axis
+for _ax in fig.figure.content
+    if _ax isa Axis
         for r  in (30, MAX_TRAJECTORY_LENGTH)
-            lines!(ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
+            lines!(_ax, Circle(zero(Point2f), r), color=:gray, linewidth = 0.5)
         end
     end
 end
@@ -180,15 +180,26 @@ rl = range(5, l1, nr)  # Radii from 5 cm to maximum common distance
 transform!(df, :centered2poi_and_cropped => ByRow(xy -> get_exit_angle.(Ref(xy), rl)) => :θs)
 df.r .= Ref(rl)
 
+p = bootstrap_dance_method(df)
+CSV.write(joinpath(output, "dance_by_method.csv"), p)
+p = bootstrap_dance(df)
+CSV.write(joinpath(output, "dance_by.csv"), p)
+p = bootstrap_light(df)
+CSV.write(joinpath(output, "light.csv"), p)
+p = bootstrap_at_run(df)
+CSV.write(joinpath(output, "at_run.csv"), p)
+
+
 # Assign colors to experimental groups for visualization
 @transform! df :color = colorant"gray"  # Default grey for reference
 light = @subset df :dance_by .== "no" :at_run .== 1  # Light comparison subset
-dance_by = @subset df :light .== "dark" :at_run .== 1  # Dance induction comparison
+dance_by = @subset df :light .== "dark" :at_run .== 1 :dance_by .≠ "hold" # Dance induction comparison
+@transform! dance_by :danced = ifelse.(:dance_by .≠ "no", "yes", "no")
 at_run = @subset df :dance_by .== "no" :light .== "dark"  # Familiarity comparison
 
 # Color coding for each comparison:
 @transform!(subset(light, :light => ByRow(==("remain")), view = true), :color = colors[1])  # Lights remain
-@rtransform!(groupby(subset(dance_by, :dance_by => ByRow(≠("no")), view = true), :dance_by), :color = :dance_by == "disrupt" ? colors[2] : colors[3])  # Induced dances
+@transform!(subset(dance_by, :danced => ByRow(==("yes")), view = true), :color = colors[2])  # Lights remain
 @transform!(subset(at_run, :at_run => ByRow(==(10)), view = true), :color = colors[4])  # 10th run
 
 # Compute mean resultant vector for each (factor, radius) combination
@@ -199,7 +210,7 @@ at_run_summary = flatten(at_run, [:θs, :r])
 light_summary1 = combine(groupby(light_summary, [:light, :r]),
                        :θs => mean_resultant_vector => :mean_resultant_vector,
                        :color => first => :color)
-dance_by_summary1 = combine(groupby(dance_by_summary, [:dance_by, :r]),
+dance_by_summary1 = combine(groupby(dance_by_summary, [:danced, :r]),
                           :θs => mean_resultant_vector => :mean_resultant_vector,
                           :color => first => :color)
 at_run_summary1 = combine(groupby(at_run_summary, [:at_run, :r]),
@@ -208,18 +219,18 @@ at_run_summary1 = combine(groupby(at_run_summary, [:at_run, :r]),
 
 # Run bootstrap analysis for each of the three comparisons
 newlight, pvalueslight = analyze_factor_bootstrap(light_summary, :light)
-newdance, pvaluesdance_by = analyze_factor_bootstrap(dance_by_summary, :dance_by)
+newdance, pvaluesdance_by = analyze_factor_bootstrap(dance_by_summary, :danced)
 newat_run, pvaluesat_run = analyze_factor_bootstrap(at_run_summary, :at_run)
 
 # Save p-value tables to CSV
-CSV.write(joinpath(output, "light.csv"), pvalueslight)
-CSV.write(joinpath(output, "dance_by.csv"), pvaluesdance_by)
-CSV.write(joinpath(output, "at_run.csv"), pvaluesat_run)
+# CSV.write(joinpath(output, "light.csv"), pvalueslight)
+# CSV.write(joinpath(output, "dance_by.csv"), pvaluesdance_by)
+# CSV.write(joinpath(output, "at_run.csv"), pvaluesat_run)
 
 # Save fitted data (for replotting without rerunning bootstrap)
-CSV.write(joinpath(output, "light_data.csv"), newlight)
-CSV.write(joinpath(output, "dance_by_data.csv"), newdance)
-CSV.write(joinpath(output, "at_run_data.csv"), newat_run)
+# CSV.write(joinpath(output, "light_data.csv"), newlight)
+# CSV.write(joinpath(output, "dance_by_data.csv"), newdance)
+# CSV.write(joinpath(output, "at_run_data.csv"), newat_run)
 
 # ============================================================================
 # SECTION 5: FIGURE GENERATION - THREE COMPARISONS
@@ -232,47 +243,47 @@ CSV.write(joinpath(output, "at_run_data.csv"), newat_run)
 
 g1 = @subset light :light .== "dark"
 g2 = @subset light :light .== "remain"
-g3 = @subset dance_by :dance_by .≠ "no"
+g3 = @subset dance_by :danced .≠ "no"
 g4 = @subset at_run :at_run .== 10
 
 width = 250
 height = 250
-fig = Figure();
 
+fig = Figure();
 # Top panels: Labels for experimental conditions
-for (i, g) in enumerate((g1, g3, g2, g4))
+for (i, g) in enumerate((g1, g2, g4, g3))
     for (j, col) in enumerate([:light_styled, :dance_by_styled, :at_run_styled])
         Label(fig[j, i], g[1, col])
     end
     # Polar plot: trajectories emanating from center (POI)
-    ax = PolarAxis(fig[4, i], rlimits = (0, 44); width, height, thetaticklabelsvisible = false)
+    _ax = PolarAxis(fig[4, i], rlimits = (0, 44); width, height, thetaticklabelsvisible = false)
     for row in eachrow(g)
         θ = splat(atan).(row.centered2poi_and_cropped) .+ π/2  # Convert to polar angle
         r = norm.(row.centered2poi_and_cropped)  # Radial distance
-        lines!(ax, θ, r, color = row.color)
+        lines!(_ax, θ, r, color = row.color)
     end
 end
-
 # Bottom panels: Mean resultant vector plots with confidence bands
 leg = []
-for (i, g) in enumerate((newdance, newlight, newat_run))
-    ax = Axis(fig[5, i + 1]; limits = ((5, 29),(0,1)), ylabel = "Resultant mean vector length",  height)
+for (i, g) in enumerate((newlight, newat_run, newdance))
+    _ax = Axis(fig[5, i + 1]; limits = ((5, 29),(0,1)), ylabel = "Resultant mean vector length",  height)
     for (k, g) in pairs(groupby(g, Not(:color, :lower, :mean_resultant_vector, :r, :upper)))
-        b = band!(ax, g.r, g.lower, g.upper, color = RGBA(g.color[1], 0.25))  # Confidence band
-        ll = lines!(ax, g.r, g.mean_resultant_vector, color = g.color[1])  # Median line
+        b = band!(_ax, g.r, g.lower, g.upper, color = RGBA(g.color[1], 0.25))  # Confidence band
+        ll = lines!(_ax, g.r, g.mean_resultant_vector, color = g.color[1])  # Median line
         push!(leg, k => [b, ll])
     end
     if i > 1
-        hideydecorations!(ax, grid = false, minorgrid = false)
+        hideydecorations!(_ax, grid = false, minorgrid = false)
     end
 end
 Label(fig[6,2:end], "Radial distance from POI (cm)")
-Legend(fig[5,1], last.(leg[[2,1,3,5,7]]), ["Lights turn off", "Dance induced by disruption", "Dance induced by holding", "Lights remain on", rich("at the 10", superscript("th"), " run")])
+# Legend(fig[5,1], last.(leg[[2,1,4,6]]), ["Lights turn off", "Dance induced", "Lights remain on", rich("at the 10", superscript("th"), " run")])
+# Legend(fig[5,1], last.(leg[[2,4,6,1]]), ["Lights turn off", "Lights remain on", rich("at the 10", superscript("th"), " run"), "Dance induced"])
+Legend(fig[5,1], last.(leg[[1,2,4,5]]), ["Lights turn off", "Lights remain on", rich("at the 10", superscript("th"), " run"), "Dance induced"])
 for i in 1:3
     rowgap!(fig.layout, i, 0)
 end
 resize_to_layout!(fig)
-
 save_figure(fig, output, "darkness 3 comparisons");
 
 # ============================================================================

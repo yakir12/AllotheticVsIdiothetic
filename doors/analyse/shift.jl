@@ -56,8 +56,10 @@ runs = load_runs_and_calibs("../track_calibrate/tracks and calibrations"; filter
 # @rtransform! runs :dance_by = :dance_spontaneous ? "spontaneous" : :dance_by
 
 # filter out all the runs that are dance=no and have a spontaneous dance in them
-@rsubset! runs !(:dance_by == "no" && :distance_cm ≠ 460 && :dance_spontaneous)
-@rtransform! runs :dance_by = (:distance_cm == 460 && :dance_by == "no" && :dance_spontaneous) ? "spontaneous" : :dance_by
+# @rsubset! runs !(:dance_by == "no" && :distance_cm ≠ 460 && :dance_spontaneous)
+# @rtransform! runs :dance_by = (:distance_cm == 460 && :dance_by == "no" && :dance_spontaneous) ? "spontaneous" : :dance_by
+
+@rtransform! runs :dance_by = (:dance_by == "no" && :dance_spontaneous) ? "spontaneous" : :dance_by
 
 # Apply standard trajectory processing pipeline with spontaneous dance handling
 process_trajectories!(runs;

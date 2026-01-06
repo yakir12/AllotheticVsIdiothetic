@@ -307,12 +307,16 @@ Returns vector of formatted strings:
 These quantify uncertainty in p-values across bootstrap resamples.
 """
 function stats(x)
-    p = count(>(0), x)/length(x)
-    if p > 0.5
-        1 - p
-    else
-        p
-    end
+    p_negative = count(x .< 0)/length(x)  # proportion below zero
+    p_positive = count(x .> 0)/length(x)  # proportion above zero
+    p_value = 2 * min(p_negative, p_positive)
+    #
+    # p = count(>(0), x)/length(x)
+    # if p > 0.5
+    #     1 - p
+    # else
+    #     p
+    # end
     #
     # q1, q2 = quantile(x, [0.025, 0.975])
     # if q1 < 0 && q2 > 0
@@ -368,8 +372,8 @@ function analyze_factor_bootstrap(df, factor; n_radii=100, n_bootstrap=10_000)
     rl_range = extrema(df.r)
     rl2 = range(rl_range..., n_radii)
     newdata = combine(groupby(df, factor),
-                     :r => first => :r,
-                     :color => first => :color)
+                      :r => first => :r,
+                      :color => first => :color)
     newdata.r .= Ref(rl2)
     newdata = flatten(newdata, :r)
     newdata.mean_resultant_vector .= 0.0
@@ -389,3 +393,132 @@ function analyze_factor_bootstrap(df, factor; n_radii=100, n_bootstrap=10_000)
 
     return newdata, pvalues
 end
+
+
+
+function bootstrap_at_run(df)
+    df2 = @chain df begin
+        @subset :dance_by .== "no" :light .== "dark"  # Familiarity comparison
+        @select :at_run :r :θs
+        flatten([:r, :θs])
+    end
+
+    n = nrow(df2)
+    factors = ("at_run", "r")
+    pvalues = Dict(k => Vector{Float64}(undef, 10_000) for k in factors)
+    i = 1
+    while i < 10_001
+        try
+            df3 = combine(groupby(@view(df2[rand(1:n, n), :]), [:at_run, :r]), :θs => mean_resultant_vector => :mean_resultant_vector)
+            m = BetaRegression.fit(BetaRegressionModel, @formula(mean_resultant_vector ~ at_run + r), df3)
+            tbl = coeftable(m)
+            for factor in factors
+                idx = findfirst(==(factor), tbl.rownms)
+                pvalues[factor][i] = tbl.cols[tbl.pvalcol][idx]
+            end
+            i += 1
+        catch ex
+            @info ex
+        end
+    end
+    prop = Dict(k => mean(<(0.05), v) for (k, v) in pvalues) # `prop` of bootstrap resamples would reject H₀ at α=0.05
+    med = Dict(k => median(v) for (k, v) in pvalues) # median P-value was `med`
+
+    return DataFrame(factor = collect(keys(prop)), proportion = collect(values(prop)), pvalue = [med[k] for k in keys(prop)])
+end
+
+function bootstrap_light(df)
+    contrast = "remain"
+    df2 = @chain df begin
+        @subset :dance_by .== "no" :at_run .== 1  # Light comparison subset
+        @select :light :r :θs
+        @rtransform :light = :light == contrast ? "0" : :light
+        flatten([:r, :θs])
+    end
+
+    n = nrow(df2)
+    factors = ("light: dark", "r")
+    pvalues = Dict(k => Vector{Float64}(undef, 10_000) for k in factors)
+    i = 1
+    while i < 10_001
+        try
+            df3 = combine(groupby(@view(df2[rand(1:n, n), :]), [:light, :r]), :θs => mean_resultant_vector => :mean_resultant_vector)
+            m = BetaRegression.fit(BetaRegressionModel, @formula(mean_resultant_vector ~ light + r), df3)
+            tbl = coeftable(m)
+            for factor in factors
+                idx = findfirst(==(factor), tbl.rownms)
+                pvalues[factor][i] = tbl.cols[tbl.pvalcol][idx]
+            end
+            i += 1
+        catch ex
+            @info ex
+        end
+    end
+    prop = Dict(k => mean(<(0.05), v) for (k, v) in pvalues) # `prop` of bootstrap resamples would reject H₀ at α=0.05
+    med = Dict(k => median(v) for (k, v) in pvalues) # median P-value was `med`
+
+    return DataFrame(factor = collect(keys(prop)), proportion = collect(values(prop)), pvalue = [med[k] for k in keys(prop)])
+end
+
+function bootstrap_dance(df)
+    df2 = @chain df begin
+        @subset :light .== "dark" :at_run .== 1 :dance_by .≠ "hold" # Dance induction comparison
+        @select :danced = ifelse.(:dance_by .≠ "no", "yes", "no")  :r :θs
+        flatten([:r, :θs])
+    end
+
+    n = nrow(df2)
+    factors = ("danced: yes", "r")
+    pvalues = Dict(k => Vector{Float64}(undef, 10_000) for k in factors)
+    i = 1
+    while i < 10_001
+        try
+            df3 = combine(groupby(@view(df2[rand(1:n, n), :]), [:danced, :r]), :θs => mean_resultant_vector => :mean_resultant_vector)
+            m = BetaRegression.fit(BetaRegressionModel, @formula(mean_resultant_vector ~ danced + r), df3)
+            tbl = coeftable(m)
+            for factor in factors
+                idx = findfirst(==(factor), tbl.rownms)
+                pvalues[factor][i] = tbl.cols[tbl.pvalcol][idx]
+            end
+            i += 1
+        catch ex
+            @info ex
+        end
+    end
+    prop = Dict(k => mean(<(0.05), v) for (k, v) in pvalues) # `prop` of bootstrap resamples would reject H₀ at α=0.05
+    med = Dict(k => median(v) for (k, v) in pvalues) # median P-value was `med`
+
+    return DataFrame(factor = collect(keys(prop)), proportion = collect(values(prop)), pvalue = [med[k] for k in keys(prop)])
+end
+
+function bootstrap_dance_method(df)
+    df2 = @chain df begin
+        @subset :light .== "dark" :at_run .== 1 :dance_by .≠ "no" # Dance induction comparison
+        @select :dance_by :r :θs
+        flatten([:r, :θs])
+    end
+
+    n = nrow(df2)
+    factors = ("dance_by: hold", "r")
+    pvalues = Dict(k => Vector{Float64}(undef, 10_000) for k in factors)
+    i = 1
+    while i < 10_001
+        try
+            df3 = combine(groupby(@view(df2[rand(1:n, n), :]), [:dance_by, :r]), :θs => mean_resultant_vector => :mean_resultant_vector)
+            m = BetaRegression.fit(BetaRegressionModel, @formula(mean_resultant_vector ~ dance_by + r), df3)
+            tbl = coeftable(m)
+            for factor in factors
+                idx = findfirst(==(factor), tbl.rownms)
+                pvalues[factor][i] = tbl.cols[tbl.pvalcol][idx]
+            end
+            i += 1
+        catch ex
+            @info ex
+        end
+    end
+    prop = Dict(k => mean(<(0.05), v) for (k, v) in pvalues) # `prop` of bootstrap resamples would reject H₀ at α=0.05
+    med = Dict(k => median(v) for (k, v) in pvalues) # median P-value was `med`
+
+    return DataFrame(factor = collect(keys(prop)), proportion = collect(values(prop)), pvalue = [med[k] for k in keys(prop)])
+end
+
