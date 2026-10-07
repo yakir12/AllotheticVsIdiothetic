@@ -1,0 +1,44 @@
+species;condition;#_in_condition;beetle_id;roll_duration_min;#_dances;roll_duration_sec;number/s
+lamarcki;natural;1;Lamarcki 1;00:03:45;6;225;0,026666667
+lamarcki;natural;2;Lamarcki 2;00:07:50;30;480;0,0625
+lamarcki;natural;3;Lamarcki 3;00:07:15;19;435;0,043678161
+lamarcki;natural;4;Lamarcki 4;00:06:04;33;364;0,090659341
+lamarcki;natural;5;Lamarcki 5;00:03:24;7;204;0,034313725
+lamarcki;natural;6;Lamarcki 6;00:07:32;11;452;0,024336283
+lamarcki;natural;7;Lamarcki 7;00:08:50;26;530;0,049056604
+lamarcki;natural;8;Lamarcki 8;00:09:42;18;582;0,030927835
+lamarcki;natural;9;Lamarcki 9;00:04:35;9;2439;0,003690037
+lamarcki;natural;10;Lamarcki 10;00:04:54;9;294;0,030612245
+lamarcki;natural;11;Lamarcki 1;00:08:20;23;500;0,046
+lamarcki;natural;12;Lamarcki 2;00:02:28;7;148;0,047297297
+lamarcki;natural;13;Lamarcki 3;00:07:10;13;430;0,030232558
+lamarcki;natural;14;Lamarcki 4;00:09:03;15;511;0,029354207
+lamarcki;natural;15;Lamarcki 5;00:06:20;7;380;0,018421053
+lamarcki;natural;16;Lamarcki 6;00:03:53;10;250;0,04
+lamarcki;natural;17;Lamarcki 7;00:02:09;0;129;0
+lamarcki;natural;18;Lamarcki 8;00:10:13;22;613;0,03588907
+lamarcki;natural;19;Lamarcki 9;00:05:25;13;325;0,04
+lamarcki;natural;20;Lamarcki 10;00:04:19;14;233;0,060085837
+lamarcki;natural;21;Lamarcki 11;00:03:56;14;230;0,060869565
+lamarcki;smooth;1;Z1;00:09:58;18;598;0,030100334
+lamarcki;smooth;2;Z2;00:02:43;0;163;0
+lamarcki;smooth;3;Z3;00:02:01;0;121;0
+lamarcki;smooth;4;Z4;00:07:32;12;452;0,026548673
+lamarcki;smooth;5;Z5;00:05:06;10;306;0,032679739
+lamarcki;smooth;6;Z6;00:03:19;2;199;0,010050251
+lamarcki;smooth;7;Z7;00:09:34;25;574;0,043554007
+lamarcki;smooth;8;Z8;00:10:10;12;610;0,019672131
+lamarcki;smooth;9;Z10;00:09:43;25;583;0,042881647
+lamarcki;smooth;10;D23;00:02:48;0;168;0
+lamarcki;smooth;11;D19;00:02:52;2;172;0,011627907
+lamarcki;smooth;12;E1;00:06:19;4;379;0,01055409
+lamarcki;smooth;13;E21;00:06:05;1;365;0,002739726
+lamarcki;smooth;14;E3;00:04:00;2;240;0,008333333
+lamarcki;smooth;15;A10;00:05:00;1;300;0,003333333
+lamarcki;smooth;16;B1;00:02:48;0;168;0
+lamarcki;smooth;17;D20;00:05:48;7;348;0,020114943
+lamarcki;smooth;18;D24;00:04:27;3;267;0,011235955
+lamarcki;smooth;19;E4;00:07:04;16;424;0,037735849
+lamarcki;smooth;20;B3;00:02:41;2;161;0,01242236
+lamarcki;smooth;21;D4;00:04:42;9;282;0,031914894
+lamarcki;smooth;22;B11;00:02:49;8;169;0,047337278

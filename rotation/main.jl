@@ -6,6 +6,7 @@ using GLMakie
 using CairoMakie
 # using StatsBase
 using GLM
+using MixedModels
 
 cutoff = 10
 
@@ -221,11 +222,31 @@ hidespines!(ax112)
 hidexdecorations!(ax112)
 # linkyaxes!(ax11, ax112)
 
-df99 = CSV.read("Elevations_test_results.csv", DataFrame)
-df99[end, :condition] = "100"
-@transform! df99 :condition = parse.(Int, :condition)
-scatter!(ax112, df99.condition, df99."R-value")
+# df99 = CSV.read("Elevations_test_results.csv", DataFrame)
+df99 = CSV.read("elevation_precision_shaverdian2022.csv", DataFrame, select = ["Elevation", "mean_r"])
 
+# df999 = empty(df99)
+# for elevation in unique(df.elevation)
+#     _, i = findmin(abs.(df99.Elevation .- elevation))
+#     push!(df999, df99[i,:])
+# end
+
+# df99[end, :condition] = "100"
+# @transform! df99 :condition = parse.(Int, :condition)
+# scatter!(ax112, df99.condition, df99."R-value")
+scatter!(ax112, df99.Elevation, df99.mean_r)
+
+function get_required_rotation(placed, dance1, dance2, dance3)
+    net_rotation = coalesce(dance1, 0) + coalesce(dance2, 0) + coalesce(dance3, 0)
+    if net_rotation > 0
+        mod(-placed, 360)
+    else
+        placed
+    end
+end
+@rtransform! df :required_rotation = get_required_rotation(:placed, :dance1, :dance2, :dance3)
+m = fit(MixedModel,@formula(log(abs_total) ~ elevation + required_rotation + (1|id)), df)
+@show m
 
 row2 = fig[2,1] = GridLayout()
 
@@ -239,7 +260,9 @@ df2 = @subset df :category .≠ "both"
 plotit!(ax2, df2, :longer_direction)
 
 
-m = glm(@formula(longer_direction ~ elevation), df2, Binomial())
+m0 = fit(MixedModel, @formula(longer_direction ~ elevation + (1|id)), df2, Bernoulli())
+m = glm(@formula(longer_direction ~ elevation), df2, Bernoulli())
+MixedModels.likelihoodratiotest(m, m0)
 @show m
 
 n = 100
@@ -259,7 +282,9 @@ ax3 = Axis(row2[1,2]; xticks = 0:30:90, title = "Direction changes", limits)
 plotit!(ax3, df, :changed_direction)
 
 
-m = glm(@formula(changed_direction ~ elevation), df, Binomial())
+m0 = fit(MixedModel, @formula(changed_direction ~ elevation + (1|id)), df, Bernoulli())
+m = glm(@formula(changed_direction ~ elevation), df, Bernoulli())
+MixedModels.likelihoodratiotest(m, m0)
 @show m
 n = 100
 newdf = DataFrame(elevation = range(0, 90, n), changed_direction = falses(n))
@@ -275,7 +300,9 @@ hideydecorations!(ax3, label = false, grid = false, minorgrid = false)
 
 linkaxes!(ax3, ax2)
 
-m = glm(@formula(lap ~ elevation), df, Binomial())
+m0 = fit(MixedModel, @formula(lap ~ elevation + (1|id)), df, Bernoulli(); fast = true)
+m = glm(@formula(lap ~ elevation), df, Bernoulli())
+MixedModels.likelihoodratiotest(m, m0)
 @show m
 n = 100
 newdf = DataFrame(elevation = range(0, 90, n), lap = falses(n))

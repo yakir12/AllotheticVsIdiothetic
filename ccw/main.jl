@@ -267,10 +267,10 @@ colors = reverse(Makie.wong_colors())
 gap = 40
 max_y = maximum(abs, notboth.dance1)
 fig = Figure(size = (12cm, 12cm))
-ax2 = Axis(fig[1:3,1]; reversing..., limits = (-180 - gap, 180 + gap, -max_y - gap, max_y + gap), aspect = AxisAspect((180 + gap)/(max_y + gap)), xaxisposition = :top, yaxisposition = :right, xticks = [-90, 90], yticks = (max_y ./ [-2, 2], [rich("Counterclockwise", color = colors[3]), rich("Clockwise", color = colors[4])]), yticklabelrotation = -π/2)
+ax2 = Axis(fig[1:2,1]; reversing..., limits = (-180 - gap, 180 + gap, -max_y - gap, max_y + gap), aspect = AxisAspect((180 + gap)/(max_y + gap)), xaxisposition = :top, yaxisposition = :right, xticks = [-90, 90], yticks = (max_y ./ [-2, 2], [rich("Counterclockwise", color = colors[3]), rich("Clockwise", color = colors[4])]), yticklabelrotation = -π/2)
 hidespines!(ax2)
 hidedecorations!(ax2, ticklabels = false)
-ax = Axis(fig[1:3,1]; reversing..., limits = (-180 - gap, 180 + gap, -max_y - gap, max_y + gap), aspect = AxisAspect((180 + gap)/(max_y + gap)), yticks = -720:180:720, xticks = -180:180:180, ylabel = "Total rotation (°)", xlabel = "Initial orientation relative to intended bearing (°)")
+ax = Axis(fig[1:2,1]; reversing..., limits = (-180 - gap, 180 + gap, -max_y - gap, max_y + gap), aspect = AxisAspect((180 + gap)/(max_y + gap)), yticks = -720:180:720, xticks = -180:180:180, ylabel = "Total rotation (°)", xlabel = "Initial orientation relative to intended bearing (°)")
 for (i, label) in zip([0, 1, -1], ["shorter rotation direction", "longer rotation direction", "longer rotation direction"])
     ablines!(ax, 360i, -1; label, color = abs(i), colorrange = (0, 1), colormap = colors[1:2])#, linestyle = :dash)
 end
@@ -285,17 +285,17 @@ end
 poly!(ax, Rect(-180 - 0.75gap, -max_y - 0.75gap, 360 + 1.5gap, max_y - 5 + 0.75gap), color = :transparent, strokecolor = colors[3], strokewidth = 2)
 poly!(ax, Rect(-180 - 0.75gap, 5, 360 + 1.5gap, max_y - 5 + 0.75gap), color = :transparent, strokecolor = colors[4], strokewidth = 2)
 Legend(fig[1,2], ax, merge = true)
-ax = Axis(fig[2,2], xlabel = "Residuals (°)", ylabel = "Counts", xticks = -180:90:180)
-hist!(ax, notboth.residual_magnitude1, color = :black)
-ax = Axis(fig[3,2], xlabel = "Sequential rotation events", ylabel = "Absolute total rotation (°)", yticks = 0:180:1000)
+# ax = Axis(fig[2,2], xlabel = "Residuals (°)", ylabel = "Counts", xticks = -180:90:180)
+# hist!(ax, notboth.residual_magnitude1, color = :black)
+ax = Axis(fig[2,2], xlabel = "Sequential rotation events", ylabel = "Absolute total rotation (°)", yticks = 0:180:1000)
 for g in groupby(df, :id)
     lines!(ax, g.n, g.abs_total, color = (:black, 0.1))
 end
 boxplot!(ax, df.n, df.abs_total, color = :gray)
 
-Label(fig[1:3, 1,  TopLeft()], "A", fontsize = 12pt, padding = (0, 5, 5, 0), halign = :right)
+Label(fig[1:2, 1,  TopLeft()], "A", fontsize = 12pt, padding = (0, 5, 5, 0), halign = :right)
+# Label(fig[2, 2, TopLeft()], "B", fontsize = 12pt, padding = (0, 5, 5, 0), halign = :right)
 Label(fig[2, 2, TopLeft()], "B", fontsize = 12pt, padding = (0, 5, 5, 0), halign = :right)
-Label(fig[3, 2, TopLeft()], "C", fontsize = 12pt, padding = (0, 5, 5, 0), halign = :right)
 
 # display(fig)
 
