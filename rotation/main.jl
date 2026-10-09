@@ -236,17 +236,20 @@ df99 = CSV.read("elevation_precision_shaverdian2022.csv", DataFrame, select = ["
 # scatter!(ax112, df99.condition, df99."R-value")
 scatter!(ax112, df99.Elevation, df99.mean_r)
 
-function get_required_rotation(placed, dance1, dance2, dance3)
-    net_rotation = coalesce(dance1, 0) + coalesce(dance2, 0) + coalesce(dance3, 0)
-    if net_rotation > 0
-        mod(-placed, 360)
-    else
-        placed
-    end
-end
-@rtransform! df :required_rotation = get_required_rotation(:placed, :dance1, :dance2, :dance3)
+# function get_required_rotation(placed, dance1, dance2, dance3)
+#     net_rotation = coalesce(dance1, 0) + coalesce(dance2, 0) + coalesce(dance3, 0)
+#     if net_rotation > 0
+#         mod(-placed, 360)
+#     else
+#         placed
+#     end
+# end
+@rtransform! df :required_rotation = ifelse(:cw1, mod(-:placed, 360), :placed)
 m = fit(MixedModel,@formula(log(abs_total) ~ elevation + required_rotation + (1|id)), df)
 @show m
+
+sim = parametricbootstrap(MersenneTwister(12321), 1000, m)
+power_table(sim, 0.001)
 
 row2 = fig[2,1] = GridLayout()
 
